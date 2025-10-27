@@ -1,9 +1,15 @@
+'use client';
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Logo from "@/components/logo";
+import { useAuth } from "@/firebase";
+import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
 
 const GoogleIcon = () => (
   <svg className="mr-2 h-4 w-4" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
@@ -12,6 +18,40 @@ const GoogleIcon = () => (
 )
 
 export default function LoginPage() {
+  const auth = useAuth();
+  const router = useRouter();
+  const { toast } = useToast();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+      router.push("/dashboard");
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Login failed",
+        description: error.message,
+      });
+    }
+  };
+  
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      router.push("/dashboard");
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Login failed",
+        description: error.message,
+      });
+    }
+  };
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-secondary/30 p-4">
       <Card className="w-full max-w-sm shadow-xl">
@@ -25,8 +65,8 @@ export default function LoginPage() {
           <CardDescription>Enter your credentials to access your account</CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-4">
-            <Button variant="outline" className="w-full">
+          <div className="grid gap-4">
+            <Button variant="outline" className="w-full" onClick={handleGoogleLogin}>
               <GoogleIcon />
               Login with Google
             </Button>
@@ -38,9 +78,11 @@ export default function LoginPage() {
                 <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
               </div>
             </div>
+          </div>
+          <form className="grid gap-4 mt-4" onSubmit={handleEmailLogin}>
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="m@example.com" required />
+              <Input id="email" type="email" placeholder="m@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             <div className="grid gap-2">
               <div className="flex items-center">
@@ -49,7 +91,7 @@ export default function LoginPage() {
                   Forgot your password?
                 </Link>
               </div>
-              <Input id="password" type="password" required />
+              <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
               Login

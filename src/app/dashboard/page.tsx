@@ -1,16 +1,22 @@
+'use client';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useUser } from "@/firebase";
 import { PlusCircle } from "lucide-react";
+import Link from "next/link";
 
 export default function DashboardPage() {
+  const { user } = useUser();
   return (
     <div className="flex flex-1 flex-col">
       <header className="p-4 md:p-6 border-b">
         <div className="flex items-center justify-between">
             <h1 className="text-2xl font-headline font-bold">Dashboard</h1>
-            <Button className="bg-accent text-accent-foreground hover:bg-accent/90">
-                <PlusCircle className="mr-2 h-4 w-4" />
-                Assign New Playlist
+            <Button className="bg-accent text-accent-foreground hover:bg-accent/90" asChild>
+                <Link href="/dashboard/assign">
+                  <PlusCircle className="mr-2 h-4 w-4" />
+                  Assign New Playlist
+                </Link>
             </Button>
         </div>
       </header>
@@ -18,7 +24,7 @@ export default function DashboardPage() {
         <div className="grid gap-6">
             <Card>
                 <CardHeader>
-                    <CardTitle>Welcome back, Teacher!</CardTitle>
+                    <CardTitle>Welcome back, {user?.displayName || 'Teacher'}!</CardTitle>
                     <CardDescription>Here's a quick overview of your classes and assignments.</CardDescription>
                 </CardHeader>
                 <CardContent>

@@ -7,6 +7,7 @@ import Logo from "@/components/logo";
 import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetClose } from "@/components/ui/sheet";
+import { useUser, useAuth } from "@/firebase";
 
 const navLinks = [
   { href: "#how-it-works", label: "How It Works" },
@@ -17,6 +18,8 @@ const navLinks = [
 
 const Header = () => {
   const [scrolled, setScrolled] = useState(false);
+  const { user } = useUser();
+  const auth = useAuth();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -25,6 +28,10 @@ const Header = () => {
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  const handleLogout = () => {
+    auth.signOut();
+  }
 
   return (
     <header
@@ -49,12 +56,23 @@ const Header = () => {
           ))}
         </nav>
         <div className="hidden md:flex items-center gap-2">
-          <Button variant="ghost" asChild>
-            <Link href="/login">Log In</Link>
-          </Button>
-          <Button className="bg-accent text-accent-foreground hover:bg-accent/90" asChild>
-            <Link href="/signup">Start Free</Link>
-          </Button>
+          {user ? (
+            <>
+              <Button variant="ghost" asChild>
+                <Link href="/dashboard">Dashboard</Link>
+              </Button>
+              <Button onClick={handleLogout}>Logout</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" asChild>
+                <Link href="/login">Log In</Link>
+              </Button>
+              <Button className="bg-accent text-accent-foreground hover:bg-accent/90" asChild>
+                <Link href="/signup">Start Free</Link>
+              </Button>
+            </>
+          )}
         </div>
         <div className="md:hidden">
           <Sheet>
@@ -86,16 +104,31 @@ const Header = () => {
                   ))}
                 </nav>
                 <div className="mt-8 flex flex-col gap-4">
-                    <SheetClose asChild>
+                  {user ? (
+                    <>
+                     <SheetClose asChild>
                         <Button variant="outline" asChild>
-                            <Link href="/login">Log In</Link>
+                          <Link href="/dashboard">Dashboard</Link>
                         </Button>
-                    </SheetClose>
-                    <SheetClose asChild>
-                        <Button className="bg-accent text-accent-foreground hover:bg-accent/90" asChild>
-                            <Link href="/signup">Start Free</Link>
-                        </Button>
-                    </SheetClose>
+                      </SheetClose>
+                      <SheetClose asChild>
+                        <Button onClick={handleLogout} className="bg-accent text-accent-foreground hover:bg-accent/90">Logout</Button>
+                      </SheetClose>
+                    </>
+                  ) : (
+                    <>
+                      <SheetClose asChild>
+                          <Button variant="outline" asChild>
+                              <Link href="/login">Log In</Link>
+                          </Button>
+                      </SheetClose>
+                      <SheetClose asChild>
+                          <Button className="bg-accent text-accent-foreground hover:bg-accent/90" asChild>
+                              <Link href="/signup">Start Free</Link>
+                          </Button>
+                      </SheetClose>
+                    </>
+                  )}
                 </div>
               </div>
             </SheetContent>

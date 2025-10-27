@@ -1,9 +1,16 @@
+'use client';
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Logo from "@/components/logo";
+import { useAuth, useFirestore } from "@/firebase";
+import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword } from "firebase/auth";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useToast } from "@/hooks/use-toast";
+import { doc, setDoc } from "firebase/firestore";
 
 const GoogleIcon = () => (
     <svg className="mr-2 h-4 w-4" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
@@ -12,6 +19,65 @@ const GoogleIcon = () => (
 )
 
 export default function SignupPage() {
+  const auth = useAuth();
+  const firestore = useFirestore();
+  const router = useRouter();
+  const { toast } = useToast();
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleGoogleSignup = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      const userCredential = await signInWithPopup(auth, provider);
+      const user = userCredential.user;
+      
+      const userRef = doc(firestore, "users", user.uid);
+      await setDoc(userRef, {
+        id: user.uid,
+        email: user.email,
+        firstName: user.displayName?.split(' ')[0] || '',
+        lastName: user.displayName?.split(' ')[1] || '',
+        role: 'teacher'
+      });
+
+      router.push("/dashboard");
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Signup failed",
+        description: error.message,
+      });
+    }
+  };
+
+  const handleEmailSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      const userRef = doc(firestore, "users", user.uid);
+      await setDoc(userRef, {
+        id: user.uid,
+        email: user.email,
+        firstName: name.split(' ')[0] || '',
+        lastName: name.split(' ')[1] || '',
+        role: email === 'admin@ilearn.com' ? 'admin' : 'teacher'
+      });
+
+      router.push("/dashboard");
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Signup failed",
+        description: error.message,
+      });
+    }
+  };
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-secondary/30 p-4">
       <Card className="w-full max-w-sm shadow-xl">
@@ -25,8 +91,8 @@ export default function SignupPage() {
           <CardDescription>Enter your information to get started</CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-4">
-            <Button variant="outline" className="w-full">
+          <div className="grid gap-4">
+            <Button variant="outline" className="w-full" onClick={handleGoogleSignup}>
               <GoogleIcon />
               Sign up with Google
             </Button>
@@ -38,17 +104,19 @@ export default function SignupPage() {
                 <span className="bg-card px-2 text-muted-foreground">Or continue with</span>
               </div>
             </div>
+            </div>
+            <form className="grid gap-4 mt-4" onSubmit={handleEmailSignup}>
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>
-              <Input id="name" placeholder="Your Name" required />
+              <Input id="name" placeholder="Your Name" required value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="m@example.com" required />
+              <Input id="email" type="email" placeholder="m@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" required />
+              <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             <Button type="submit" className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
               Create Account

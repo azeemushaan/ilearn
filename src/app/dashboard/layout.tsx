@@ -1,3 +1,4 @@
+'use client';
 import {
   SidebarProvider,
   Sidebar,
@@ -18,16 +19,53 @@ import {
   Settings,
   HelpCircle,
   LogOut,
+  Shield,
+  CreditCard,
 } from "lucide-react";
 import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const auth = useAuth();
+  const { user, isUserLoading } = useUser();
+  const router = useRouter();
+  const firestore = useFirestore();
+  const [userRole, setUserRole] = useState<string | null>(null);
+
+  const userDocRef = useMemoFirebase(() => {
+    if (!user) return null;
+    return doc(firestore, "users", user.uid);
+  }, [firestore, user]);
+
+  const { data: userData } = useDoc(userDocRef);
+
+  useEffect(() => {
+    if (!isUserLoading && !user) {
+      router.push("/login");
+    }
+    if (userData) {
+      setUserRole((userData as any).role);
+    }
+  }, [user, isUserLoading, router, userData]);
+
+  const handleLogout = async () => {
+    await auth.signOut();
+    router.push("/login");
+  };
+
+  if (isUserLoading || !user) {
+    return <div>Loading...</div>; // Or a proper loading spinner
+  }
+
   return (
     <SidebarProvider>
       <Sidebar>
@@ -45,6 +83,22 @@ export default function DashboardLayout({
                 <span>Dashboard</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
+            {userRole === 'admin' && (
+              <>
+                <SidebarMenuItem>
+                  <SidebarMenuButton href="/dashboard/subscriptions" tooltip="Subscriptions">
+                    <CreditCard />
+                    <span>Subscriptions</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton href="/dashboard/payments" tooltip="Payments">
+                    <CreditCard />
+                    <span>Payments</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </>
+            )}
             <SidebarMenuItem>
               <SidebarMenuButton href="#" tooltip="Playlists">
                 <BookPlay />
@@ -82,15 +136,15 @@ export default function DashboardLayout({
           </SidebarMenu>
           <div className="flex items-center gap-3 p-2 rounded-lg bg-secondary">
              <Avatar className="h-9 w-9">
-              <AvatarImage src="https://picsum.photos/seed/user/100/100" alt="User avatar" />
-              <AvatarFallback>T</AvatarFallback>
+              <AvatarImage src={user.photoURL || "https://picsum.photos/seed/user/100/100"} alt="User avatar" />
+              <AvatarFallback>{user.email?.[0].toUpperCase()}</AvatarFallback>
             </Avatar>
             <div className="flex-1 overflow-hidden">
-                <p className="text-sm font-semibold text-foreground truncate">Teacher Name</p>
-                <p className="text-xs text-muted-foreground truncate">teacher@example.com</p>
+                <p className="text-sm font-semibold text-foreground truncate">{user.displayName || user.email}</p>
+                <p className="text-xs text-muted-foreground truncate">{userRole}</p>
             </div>
-            <Button variant="ghost" size="icon" className="shrink-0" asChild>
-                <a href="/login"><LogOut className="text-muted-foreground" /></a>
+            <Button variant="ghost" size="icon" className="shrink-0" onClick={handleLogout}>
+                <LogOut className="text-muted-foreground" />
             </Button>
           </div>
         </SidebarFooter>
