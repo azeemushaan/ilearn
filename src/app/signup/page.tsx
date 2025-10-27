@@ -11,7 +11,7 @@ import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, Us
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { doc, setDoc, getDoc, serverTimestamp, addDoc, collection } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, addDoc, collection } from "firebase/firestore";
 import { setUserClaims } from "@/ai/flows/set-user-claims";
 
 const GoogleIcon = () => (
@@ -52,13 +52,11 @@ export default function SignupPage() {
     const role = isSpecialAdmin ? 'admin' : 'teacher';
 
     let coachId: string;
-    let coachRef;
-
+    
     // The special admin is their own coach
     if (isSpecialAdmin) {
         coachId = user.uid;
-        coachRef = doc(firestore, "coaches", coachId);
-        
+        const coachRef = doc(firestore, "coaches", coachId);
         await setDoc(coachRef, {
             displayName: name || user.email,
             email: user.email,
@@ -78,7 +76,6 @@ export default function SignupPage() {
 
     // Set user document in Firestore
     const userRef = doc(firestore, "users", user.uid);
-    const nameParts = name.split(' ');
     await setDoc(userRef, {
         coachId: coachId,
         role: role,
@@ -93,7 +90,7 @@ export default function SignupPage() {
     }, { merge: true });
 
     // Set custom claims using the server-side flow
-    await setUserClaims({
+    const claimsResult = await setUserClaims({
         uid: user.uid,
         claims: {
             role: role,
@@ -101,6 +98,9 @@ export default function SignupPage() {
         }
     });
 
+    if (!claimsResult.success) {
+      throw new Error(claimsResult.message);
+    }
   }
 
   const handleGoogleSignup = async () => {

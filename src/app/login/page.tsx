@@ -24,6 +24,7 @@ export default function LoginPage() {
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleLoginSuccess = async (user: User) => {
     if (!auth) return;
@@ -42,9 +43,12 @@ export default function LoginPage() {
 
   const handleGoogleLogin = async () => {
     if (!auth) return;
+    setIsLoading(true);
     const provider = new GoogleAuthProvider();
     try {
       const userCredential = await signInWithPopup(auth, provider);
+      // NOTE: This assumes a user logging in with Google already exists.
+      // A more robust flow would check and create the user if they don't.
       await handleLoginSuccess(userCredential.user);
     } catch (error: any) {
       toast({
@@ -52,12 +56,14 @@ export default function LoginPage() {
         title: "Login failed",
         description: error.message,
       });
+      setIsLoading(false);
     }
   };
   
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth) return;
+    setIsLoading(true);
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       await handleLoginSuccess(userCredential.user);
@@ -67,6 +73,7 @@ export default function LoginPage() {
         title: "Login failed",
         description: error.message,
       });
+      setIsLoading(false);
     }
   };
 
@@ -84,7 +91,7 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4">
-            <Button variant="outline" className="w-full" onClick={handleGoogleLogin}>
+            <Button variant="outline" className="w-full" onClick={handleGoogleLogin} disabled={isLoading}>
               <GoogleIcon />
               Login with Google
             </Button>
@@ -100,7 +107,7 @@ export default function LoginPage() {
           <form className="grid gap-4 mt-4" onSubmit={handleEmailLogin}>
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="m@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input id="email" type="email" placeholder="m@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} disabled={isLoading} />
             </div>
             <div className="grid gap-2">
               <div className="flex items-center">
@@ -109,10 +116,10 @@ export default function LoginPage() {
                   Forgot your password?
                 </Link>
               </div>
-              <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} disabled={isLoading} />
             </div>
-            <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-              Login
+            <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={isLoading}>
+              {isLoading ? "Logging in..." : "Login"}
             </Button>
           </form>
           <div className="mt-4 text-center text-sm">
