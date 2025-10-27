@@ -41,7 +41,7 @@ export default function SignupPage() {
   const createOrUpdateUserDocument = async (user: User, name: string) => {
     if (!firestore) return;
     const userRef = doc(firestore, "users", user.uid);
-    const role = user.email?.toLowerCase() === 'azeemushan4@gmail.com' ? 'admin' : 'teacher';
+    const role = user.email?.toLowerCase() === 'ilearn@er21.org' ? 'admin' : 'teacher';
 
     let userData: any = {
       id: user.uid,
@@ -51,12 +51,13 @@ export default function SignupPage() {
       updatedAt: serverTimestamp(),
     };
     
-    const nameParts = name.split(' ');
-    userData.firstName = nameParts[0] || '';
-    userData.lastName = nameParts.slice(1).join(' ') || '';
-
     if (role === 'admin') {
         userData.firstName = 'Admin';
+        userData.lastName = '';
+    } else {
+        const nameParts = name.split(' ');
+        userData.firstName = nameParts[0] || '';
+        userData.lastName = nameParts.slice(1).join(' ') || '';
     }
 
     await setDoc(userRef, userData, { merge: true });
