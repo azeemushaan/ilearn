@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/sidebar";
 import {
   Home,
-  BookPlay,
+  PlaySquare,
   Users,
   BarChart3,
   Settings,
@@ -101,7 +101,7 @@ export default function DashboardLayout({
             )}
             <SidebarMenuItem>
               <SidebarMenuButton href="#" tooltip="Playlists">
-                <BookPlay />
+                <PlaySquare />
                 <span>Playlists</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
