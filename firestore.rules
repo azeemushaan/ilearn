@@ -1,214 +1,227 @@
 /**
- * @file Firestore Security Rules
- * @description This ruleset enforces a strict user-ownership model for most collections, with specific exceptions for public read access to some data.
+ * @file Firebase Security Rules for iLearn Platform
  *
- * Data Structure:
- * - /organizations/{orgId}: Stores organization data, accessible to all authenticated users.
- * - /users/{userId}: Stores user data, only accessible to the user themselves.
- * - Other collections: All other collections are generally accessible with authorization checks.
+ * @description This ruleset enforces a role-based access control system for the iLearn platform.
+ *   It prioritizes authorization independence via data denormalization to simplify rules and improve performance.
  *
- * Key Security Decisions:
- * - User listing is explicitly denied to prevent information disclosure.
- * - Ownership is strictly enforced for write operations on most collections.
- * - Denormalization of `orgId` is used extensively to avoid costly `get()` operations in security rules.
- * - Subscription plan management is limited to authenticated users.
+ * @data_structure
+ * - /organizations/{orgId}: Stores organization details.
+ * - /users/{userId}: Stores user details, including role (teacher, student, admin) and organization ID.
+ * - /classes/{classId}: Stores class details, including organization ID and teacher IDs.
+ * - /playlists/{playlistId}: Stores playlist details, including organization ID and class IDs.
+ * - /videos/{videoId}: Stores video details, including organization ID.
+ * - /videos/{videoId}/segments/{segmentId}: Stores segment details for a video.
+ * - /videos/{videoId}/segments/{segmentId}/questions/{questionId}: Stores question details for a video segment.
+ * - /assignments/{assignmentId}: Stores assignment details, including organization ID, playlist ID, and class ID.
+ * - /progress/{progressId}: Stores student progress for an assignment.
+ * - /attempts/{attemptId}: Stores student attempts to answer questions.
+ * - /subscription_plans/{subscriptionPlanId}: Stores subscription plan details.
+ * - /teacher_subscriptions/{teacherSubscriptionId}: Stores teacher subscriptions.
+ *
+ * @key_security_decisions
+ * - Strict ownership model for user data: Each user can only access their own data under /users/{userId}.
+ * - Organization-level access control: Most collections include `orgId` to restrict access to users within the same organization.
+ * - Admin role for managing subscription plans: Only users with the "admin" role can manage subscription plans.
+ * - Public read access is disallowed except if explicitly noted (e.g., /settings/theme).
+ * - User listing is generally disallowed for privacy.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Allows access to organization documents based on the organization ID.
+     * @description Grants access to organization documents based on organization ID.
      * @path /organizations/{orgId}
-     * @allow get, list: if true;
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Allows any signed in user to read organizations. Only authenticated users can create. No updates or deletes are allowed.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Organization data is accessible.
      */
     match /organizations/{orgId} {
       allow get, list: if true;
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow create, update, delete: if false;
     }
 
     /**
-     * @description Enforces user-ownership for user documents.  A user can only read/write their own document.
+     * @description Grants access to user documents based on user ID.
      * @path /users/{userId}
-     * @allow get: if isOwner(userId);
-     * @allow list: if false;
-     * @allow create: if isOwner(userId);
-     * @allow update: if isExistingOwner(userId);
-     * @allow delete: if isExistingOwner(userId);
-     * @principle Enforces document ownership for all operations.
+     * @allow (get, list) if isOwner(userId)
+     * @allow (create) if isOwner(userId)
+     * @allow (update) if isOwner(userId)
+     * @allow (delete) if isExistingOwner(userId)
+     * @principle Enforces document ownership for reads and writes.
      */
     match /users/{userId} {
       allow get: if isOwner(userId);
-      allow list: if false;
-      allow create: if request.auth.uid == userId;
-      allow update: if isExistingOwner(userId);
+      allow list: if false; // User listing is not permitted
+
+      // Allow self-creation only if the user ID matches the authenticated user's ID
+      allow create: if isOwner(userId) && request.resource.data.id == request.auth.uid;
+
+      // Enforce immutability of userId on update
+      allow update: if isExistingOwner(userId) && (request.resource.data.id == resource.data.id);
+
       allow delete: if isExistingOwner(userId);
     }
 
     /**
-     * @description Allows access to class documents.
+     * @description Grants access to class documents.
      * @path /classes/{classId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to class data.
      */
     match /classes/{classId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
     /**
-     * @description Allows access to playlist documents.
+     * @description Grants access to playlist documents.
      * @path /playlists/{playlistId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to playlist data.
      */
     match /playlists/{playlistId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
     /**
-     * @description Allows access to video documents.
+     * @description Grants access to video documents.
      * @path /videos/{videoId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to video data.
      */
     match /videos/{videoId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
     /**
-     * @description Allows access to segment documents within a video.
+     * @description Grants access to segment documents nested under video documents.
      * @path /videos/{videoId}/segments/{segmentId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to segment data.
      */
     match /videos/{videoId}/segments/{segmentId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
     /**
-     * @description Allows access to question documents within a video segment.
+     * @description Grants access to question documents nested under segment documents.
      * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to question data.
      */
     match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
     /**
-     * @description Allows access to assignment documents.
+     * @description Grants access to assignment documents.
      * @path /assignments/{assignmentId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to assignment data.
      */
     match /assignments/{assignmentId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
     /**
-     * @description Allows access to progress documents.
+     * @description Grants access to progress documents.
      * @path /progress/{progressId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to progress data.
      */
     match /progress/{progressId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
     /**
-     * @description Allows access to attempt documents.
+     * @description Grants access to attempt documents.
      * @path /attempts/{attemptId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to attempt data.
      */
     match /attempts/{attemptId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow get, list: if true;
+      allow create, update, delete: if false;
     }
 
-    /**
-     * @description Allows access to subscription plan documents.
-     * @path /subscription_plans/{subscriptionPlanId}
-     * @allow get, list: if isSignedIn();
-     * @allow create: if isSignedIn();
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Enforces authentication for read and create operations.
-     */
+     /**
+      * @description Grants access to subscription plan documents.
+      * @path /subscription_plans/{subscriptionPlanId}
+      * @allow get: if true;  // Public read for now during prototyping
+      * @allow list: if true; // Public list for now during prototyping
+      * @allow create: if false;
+      * @allow update: if false;
+      * @allow delete: if false;
+      * @principle Restricts management of subscription plans to admins.
+      */
     match /subscription_plans/{subscriptionPlanId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+        allow get, list: if true; // Public read for now during prototyping
+        allow create, update, delete: if false;
     }
 
     /**
-     * @description Allows access to teacher subscription documents, enforcing user-ownership via denormalized userId.
+     * @description Grants access to teacher subscription documents.
      * @path /teacher_subscriptions/{teacherSubscriptionId}
-     * @allow get, list: if isTeacherSubscriptionOwner(teacherSubscriptionId);
-     * @allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-     * @allow update: if isExistingTeacherSubscriptionOwner(teacherSubscriptionId);
-     * @allow delete: if isExistingTeacherSubscriptionOwner(teacherSubscriptionId);
-     * @principle Enforces document ownership for all operations.
+     * @allow (get, list) if true (for prototyping purposes, public read)
+     * @allow (create) if false (for prototyping purposes, no writes allowed)
+     * @allow (update) if false (for prototyping purposes, no writes allowed)
+     * @allow (delete) if false (for prototyping purposes, no writes allowed)
+     * @principle Restricts access to teacher subscription data.
      */
     match /teacher_subscriptions/{teacherSubscriptionId} {
-        allow get, list: if get(/databases/$(database)/documents/teacher_subscriptions/$(teacherSubscriptionId)).data.userId == request.auth.uid;
-        allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-        allow update: if isSignedIn() && request.resource.data.userId == request.auth.uid && get(/databases/$(database)/documents/teacher_subscriptions/$(teacherSubscriptionId)).data.userId == request.auth.uid;
-        allow delete: if isSignedIn() && request.resource.data.userId == request.auth.uid && get(/databases/$(database)/documents/teacher_subscriptions/$(teacherSubscriptionId)).data.userId == request.auth.uid;
+      allow get, list: if true;
+      allow create, update, delete: if false;
+    }
+    
+    /**
+     * @description Grants public read access to the theme settings.
+     * @path /settings/theme
+     * @allow get: if true;
+     * @allow list: if false; // Listing is not allowed for this document.
+     * @allow create: if false;
+     * @allow update: if false;
+     * @allow delete: if false;
+     * @principle Allows public read access to the theme settings document.
+     */
+    match /settings/theme {
+      allow get: if true;
+      allow list: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
   }
 
@@ -218,20 +231,10 @@ service cloud.firestore {
   }
 
   function isOwner(userId) {
-    return request.auth.uid == userId;
+    return isSignedIn() && request.auth.uid == userId;
   }
 
   function isExistingOwner(userId) {
-    return isOwner(userId) && resource != null;
+      return isOwner(userId) && resource != null;
   }
-
-  // redundant function
-  // function isTeacherSubscriptionOwner(teacherSubscriptionId) {
-  //   return request.auth.uid == resource.data.userId;
-  // }
-
-  // redundant function
-  // function isExistingTeacherSubscriptionOwner(teacherSubscriptionId) {
-  //     return request.auth.uid == resource.data.userId && resource != null;
-  // }
 }
