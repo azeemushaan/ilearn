@@ -21,12 +21,13 @@ import {
   LogOut,
   Shield,
   CreditCard,
+  Package,
 } from "lucide-react";
 import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { doc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -58,11 +59,13 @@ export default function DashboardLayout({
   }, [user, isUserLoading, router, userData]);
 
   const handleLogout = async () => {
-    await auth.signOut();
+    if (auth) {
+      await auth.signOut();
+    }
     router.push("/login");
   };
 
-  if (isUserLoading || !user) {
+  if (isUserLoading || !userRole) {
     return <div>Loading...</div>; // Or a proper loading spinner
   }
 
@@ -87,7 +90,7 @@ export default function DashboardLayout({
               <>
                 <SidebarMenuItem>
                   <SidebarMenuButton href="/dashboard/subscriptions" tooltip="Subscriptions">
-                    <CreditCard />
+                    <Package />
                     <span>Subscriptions</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -100,19 +103,19 @@ export default function DashboardLayout({
               </>
             )}
             <SidebarMenuItem>
-              <SidebarMenuButton href="#" tooltip="Playlists">
+              <SidebarMenuButton href="/dashboard/playlists" tooltip="Playlists">
                 <PlaySquare />
                 <span>Playlists</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton href="#" tooltip="Classes">
+              <SidebarMenuButton href="/dashboard/classes" tooltip="Classes">
                 <Users />
                 <span>Classes</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton href="#" tooltip="Analytics">
+              <SidebarMenuButton href="/dashboard/analytics" tooltip="Analytics">
                 <BarChart3 />
                 <span>Analytics</span>
               </SidebarMenuButton>
@@ -136,11 +139,11 @@ export default function DashboardLayout({
           </SidebarMenu>
           <div className="flex items-center gap-3 p-2 rounded-lg bg-secondary">
              <Avatar className="h-9 w-9">
-              <AvatarImage src={user.photoURL || "https://picsum.photos/seed/user/100/100"} alt="User avatar" />
-              <AvatarFallback>{user.email?.[0].toUpperCase()}</AvatarFallback>
+              <AvatarImage src={user?.photoURL || "https://picsum.photos/seed/user/100/100"} alt="User avatar" />
+              <AvatarFallback>{user?.email?.[0].toUpperCase()}</AvatarFallback>
             </Avatar>
             <div className="flex-1 overflow-hidden">
-                <p className="text-sm font-semibold text-foreground truncate">{user.displayName || user.email}</p>
+                <p className="text-sm font-semibold text-foreground truncate">{user?.displayName || user?.email}</p>
                 <p className="text-xs text-muted-foreground truncate">{userRole}</p>
             </div>
             <Button variant="ghost" size="icon" className="shrink-0" onClick={handleLogout}>
