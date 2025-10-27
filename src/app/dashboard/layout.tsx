@@ -29,6 +29,7 @@ import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from "@/fireb
 import { doc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 export default function DashboardLayout({
   children,
@@ -80,43 +81,55 @@ export default function DashboardLayout({
         <SidebarContent>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton href="/dashboard" isActive tooltip="Dashboard">
-                <Home />
-                <span>Dashboard</span>
-              </SidebarMenuButton>
+                <SidebarMenuButton asChild isActive={router.pathname === '/dashboard'} tooltip="Dashboard">
+                  <Link href="/dashboard">
+                    <Home />
+                    <span>Dashboard</span>
+                  </Link>
+                </SidebarMenuButton>
             </SidebarMenuItem>
             {userRole === 'admin' && (
               <>
                 <SidebarMenuItem>
-                  <SidebarMenuButton href="/dashboard/subscriptions" tooltip="Subscriptions">
-                    <Package />
-                    <span>Subscriptions</span>
+                  <SidebarMenuButton asChild tooltip="Subscriptions">
+                    <Link href="/dashboard/subscriptions">
+                      <Package />
+                      <span>Subscriptions</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton href="/dashboard/payments" tooltip="Payments">
-                    <CreditCard />
-                    <span>Payments</span>
+                  <SidebarMenuButton asChild tooltip="Payments">
+                    <Link href="/dashboard/payments">
+                      <CreditCard />
+                      <span>Payments</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </>
             )}
             <SidebarMenuItem>
-              <SidebarMenuButton href="/dashboard/playlists" tooltip="Playlists">
-                <PlaySquare />
-                <span>Playlists</span>
+              <SidebarMenuButton asChild tooltip="Playlists">
+                <Link href="/dashboard/playlists">
+                  <PlaySquare />
+                  <span>Playlists</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton href="/dashboard/classes" tooltip="Classes">
-                <Users />
-                <span>Classes</span>
+              <SidebarMenuButton asChild tooltip="Classes">
+                <Link href="/dashboard/classes">
+                  <Users />
+                  <span>Classes</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton href="/dashboard/analytics" tooltip="Analytics">
-                <BarChart3 />
-                <span>Analytics</span>
+              <SidebarMenuButton asChild tooltip="Analytics">
+                <Link href="/dashboard/analytics">
+                  <BarChart3 />
+                  <span>Analytics</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -124,15 +137,19 @@ export default function DashboardLayout({
         <SidebarFooter>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton href="#" tooltip="Settings">
-                <Settings />
-                <span>Settings</span>
+              <SidebarMenuButton asChild tooltip="Settings">
+                <Link href="#">
+                  <Settings />
+                  <span>Settings</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton href="#" tooltip="Support">
-                <HelpCircle />
-                <span>Support</span>
+              <SidebarMenuButton asChild tooltip="Support">
+                <Link href="#">
+                  <HelpCircle />
+                  <span>Support</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
