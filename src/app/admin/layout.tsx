@@ -41,6 +41,7 @@ export default function AdminDashboardLayout({
   const router = useRouter();
   const firestore = useFirestore();
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
   const userDocRef = useMemoFirebase(() => {
     if (!firestore || !user) return null;
@@ -50,30 +51,46 @@ export default function AdminDashboardLayout({
   const { data: userData, isLoading: isUserDataLoading } = useDoc(userDocRef);
 
   useEffect(() => {
+    // If auth state is resolved and there's no user, redirect to admin login.
     if (!isUserLoading && !user) {
       router.push("/admin/login");
+      return;
     }
-    if (userData) {
+    
+    // If we have a user but are still waiting for their Firestore document
+    if (user && isUserDataLoading) {
+        // You can show a loading state here if needed
+        return;
+    }
+
+    if (user && userData) {
         const role = (userData as any).role;
-        setUserRole(role);
-        if (role !== 'admin') {
+        if (role === 'admin') {
+            setUserRole(role);
+            setIsAuthorized(true);
+        } else {
+            // User is not an admin, redirect them away.
             router.push('/dashboard');
         }
-    } else if (!isUserLoading && !isUserDataLoading && !userData && user) {
-        // If user exists but no user document, they can't be admin
+    } else if (user && !userData && !isUserDataLoading) {
+        // User exists in Auth, but not in Firestore or role is wrong.
+        // This could be a race condition on first signup, or a non-admin user.
+        // Redirecting them away is a safe default.
         router.push('/dashboard');
     }
-  }, [user, isUserLoading, router, userData, isUserDataLoading]);
+    
+  }, [user, isUserLoading, userData, isUserDataLoading, router]);
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     if (auth) {
-      await auth.signOut();
+      auth.signOut().then(() => {
+        // Ensure redirect happens after signout is complete.
+        router.push('/admin/login');
+      });
     }
-    // Force a reload to clear any cached session data
-    window.location.href = '/admin/login';
   };
 
-  if (isUserLoading || isUserDataLoading || userRole !== 'admin') {
+  if (isUserLoading || isUserDataLoading || !isAuthorized) {
     return <div className="flex h-screen w-full items-center justify-center">Loading and verifying admin access...</div>; 
   }
 
