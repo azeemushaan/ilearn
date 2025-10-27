@@ -19,7 +19,6 @@ import {
   Settings,
   HelpCircle,
   LogOut,
-  Shield,
   CreditCard,
   Package,
 } from "lucide-react";
