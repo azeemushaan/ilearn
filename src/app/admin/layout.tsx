@@ -1,3 +1,4 @@
+
 'use client';
 import {
   SidebarProvider,
@@ -50,7 +51,7 @@ export default function AdminDashboardLayout({
 
   useEffect(() => {
     if (!isUserLoading && !user) {
-      router.push("/login");
+      router.push("/admin/login");
     }
     if (userData) {
         const role = (userData as any).role;
@@ -69,7 +70,7 @@ export default function AdminDashboardLayout({
       await auth.signOut();
     }
     // Force a reload to clear any cached session data
-    window.location.href = '/login';
+    window.location.href = '/admin/login';
   };
 
   if (isUserLoading || isUserDataLoading || userRole !== 'admin') {

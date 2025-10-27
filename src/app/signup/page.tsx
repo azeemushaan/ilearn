@@ -1,3 +1,4 @@
+
 'use client';
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -30,9 +31,6 @@ export default function SignupPage() {
 
   const handleLoginSuccess = async (user: User) => {
     if (!firestore) return;
-    const userDocRef = doc(firestore, "users", user.uid);
-    // The user document might not be available immediately after creation.
-    // We check the role from the email, which is reliable during signup.
     const role = user.email?.toLowerCase() === 'ilearn@er21.org' ? 'admin' : 'teacher';
     
     if (role === 'admin') {
