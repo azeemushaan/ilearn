@@ -1,837 +1,443 @@
 {
   "entities": {
-    "Organization": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Organization",
+    "Coach": {
+      "title": "Coach",
       "type": "object",
-      "description": "Represents an organization, such as a school or district, using the iLearn platform.",
+      "description": "Represents a coach, who acts as a tenant in the system.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the organization."
+        "displayName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "brand": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "logoUrl": { "type": "string", "format": "uri" },
+            "color": { "type": "string" }
+          }
         },
-        "name": {
-          "type": "string",
-          "description": "Name of the organization."
+        "plan": {
+          "type": "object",
+          "properties": {
+            "tier": { "type": "string", "enum": ["free", "pro", "enterprise"] },
+            "seats": { "type": "number" },
+            "expiresAt": { "type": "string", "format": "date-time" }
+          }
         },
-        "description": {
-          "type": "string",
-          "description": "Description of the organization."
+        "settings": {
+          "type": "object",
+          "properties": {
+            "locale": { "type": "string", "enum": ["en", "ur"] },
+            "lowBandwidthDefault": { "type": "boolean" },
+            "captchaRequired": { "type": "boolean" }
+          }
         },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the organization was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the organization was last updated.",
-          "format": "date-time"
-        }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "name"
-      ]
+      "required": ["displayName", "email", "plan", "settings"]
     },
     "User": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "User",
       "type": "object",
-      "description": "Represents a user of the iLearn platform (teacher or student).",
+      "description": "Represents any signed-in user of the platform.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the user."
-        },
-        "orgId": {
-          "type": "string",
-          "description": "Reference to Organization. (Relationship: Organization 1:N User)"
-        },
-        "email": {
-          "type": "string",
-          "description": "Email address of the user.",
-          "format": "email"
-        },
-        "role": {
-          "type": "string",
-          "description": "Role of the user within the organization (e.g., 'teacher', 'student', 'admin')."
-        },
-        "firstName": {
-          "type": "string",
-          "description": "First name of the user."
-        },
-        "lastName": {
-          "type": "string",
-          "description": "Last name of the user."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the user was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the user was last updated.",
-          "format": "date-time"
-        }
-      },
-      "required": [
-        "id",
-        "orgId",
-        "email",
-        "role"
-      ]
-    },
-    "Class": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Class",
-      "type": "object",
-      "description": "Represents a class or course within an organization.",
-      "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the class."
-        },
-        "orgId": {
-          "type": "string",
-          "description": "Reference to Organization. (Relationship: Organization 1:N Class)"
-        },
-        "name": {
-          "type": "string",
-          "description": "Name of the class."
-        },
-        "teacherIds": {
-          "type": "array",
-          "description": "References to Teachers. (Relationship: Class N:N User)",
-          "items": {
-            "type": "string"
+        "coachId": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "teacher", "student"] },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "email": { "type": "string", "format": "email" },
+            "photoUrl": { "type": "string", "format": "uri" }
           }
         },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the class was created.",
-          "format": "date-time"
+        "status": { "type": "string", "enum": ["active", "invited", "disabled"] },
+        "studentMeta": {
+          "type": "object",
+          "properties": {
+            "guardianName": { "type": "string" },
+            "gradeBand": { "type": "string", "enum": ["G1-2", "G3-5", "G6-8"] }
+          }
         },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the class was last updated.",
-          "format": "date-time"
-        }
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "orgId",
-        "name"
-      ]
+      "required": ["coachId", "role", "profile", "status"]
+    },
+    "Invite": {
+      "title": "Invite",
+      "type": "object",
+      "description": "Represents an invitation for a user to join a coach's organization.",
+      "properties": {
+        "coachId": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "teacher", "student"] },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "redeemedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["coachId", "email", "role", "expiresAt"]
+    },
+    "Cohort": {
+      "title": "Cohort",
+      "type": "object",
+      "description": "Represents a coach's group or class.",
+      "properties": {
+        "coachId": { "type": "string" },
+        "name": { "type": "string" },
+        "teacherIds": { "type": "array", "items": { "type": "string" } },
+        "memberCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["coachId", "name", "teacherIds", "memberCount"]
+    },
+    "CohortMember": {
+        "title": "Cohort Member",
+        "type": "object",
+        "description": "Represents a member within a cohort.",
+        "properties": {
+            "coachId": { "type": "string" },
+            "cohortId": { "type": "string" },
+            "userId": { "type": "string" },
+            "roleInCohort": { "type": "string", "enum": ["teacher", "student"] },
+            "joinedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["coachId", "cohortId", "userId", "roleInCohort", "joinedAt"]
     },
     "Playlist": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Playlist",
       "type": "object",
-      "description": "Represents a YouTube playlist assigned for learning.",
+      "description": "Represents a YouTube playlist used for learning.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the playlist."
-        },
-        "orgId": {
-          "type": "string",
-          "description": "Reference to Organization. (Relationship: Organization 1:N Playlist)"
-        },
-        "title": {
-          "type": "string",
-          "description": "Title of the playlist."
-        },
-        "youtubePlaylistId": {
-          "type": "string",
-          "description": "The YouTube Playlist ID."
-        },
-        "classIds": {
-          "type": "array",
-          "description": "References to Classes. (Relationship: Playlist N:N Class)",
-          "items": {
-            "type": "string"
+        "coachId": { "type": "string" },
+        "title": { "type": "string" },
+        "youtubePlaylistId": { "type": "string" },
+        "assignedCohortIds": { "type": "array", "items": { "type": "string" } },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "minWatchPct": { "type": "number" },
+            "minScore": { "type": "number" },
+            "seekLock": { "type": "boolean" }
           }
         },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the playlist was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the playlist was last updated.",
-          "format": "date-time"
-        }
+        "status": { "type": "string", "enum": ["new", "processing", "ready", "error"] },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "orgId",
-        "title",
-        "youtubePlaylistId"
-      ]
+      "required": ["coachId", "title", "youtubePlaylistId", "policy", "status", "createdBy"]
     },
     "Video": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Video",
       "type": "object",
-      "description": "Represents a video within a playlist.",
+      "description": "Represents a video, deduped across a coach's content.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the video."
+        "coachId": { "type": "string" },
+        "youtubeVideoId": { "type": "string" },
+        "title": { "type": "string" },
+        "durationSec": { "type": "number" },
+        "hasCaptions": { "type": "boolean" },
+        "chaptersOnly": { "type": "boolean" },
+        "segmentation": {
+            "type": "object",
+            "properties": {
+                "strategy": { "type": "string", "enum": ["captions", "chapters", "manual"]},
+                "chunkAvgSec": { "type": "number" }
+            }
         },
-        "orgId": {
-          "type": "string",
-          "description": "Reference to Organization. (Relationship: Organization 1:N Video)"
-        },
-        "youtubeVideoId": {
-          "type": "string",
-          "description": "The YouTube Video ID."
-        },
-        "title": {
-          "type": "string",
-          "description": "Title of the video."
-        },
-        "duration": {
-          "type": "number",
-          "description": "Duration of the video in seconds."
-        },
-        "hasCaptions": {
-          "type": "boolean",
-          "description": "Indicates whether the video has captions available."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the video was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the video was last updated.",
-          "format": "date-time"
-        }
+        "playlistIds": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["processing", "ready", "error"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "orgId",
-        "youtubeVideoId",
-        "title"
-      ]
+      "required": ["coachId", "youtubeVideoId", "title", "durationSec", "hasCaptions", "status"]
     },
     "Segment": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Segment",
       "type": "object",
-      "description": "Represents a segment of a video (e.g., a chapter or time-based section).",
+      "description": "Represents a segment of a video for learning.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the segment."
-        },
-        "videoId": {
-          "type": "string",
-          "description": "Reference to Video. (Relationship: Video 1:N Segment)"
-        },
-        "tStartSec": {
-          "type": "number",
-          "description": "Start time of the segment in seconds."
-        },
-        "tEndSec": {
-          "type": "number",
-          "description": "End time of the segment in seconds."
-        },
-        "textChunkHash": {
-          "type": "string",
-          "description": "Hash of the text content of the segment."
-        },
-        "summary": {
-          "type": "string",
-          "description": "Summary of the segment content."
-        },
-        "difficulty": {
-          "type": "string",
-          "description": "Difficulty level of the segment (e.g., 'easy', 'medium', 'hard')."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the segment was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the segment was last updated.",
-          "format": "date-time"
+        "tStartSec": { "type": "number" },
+        "tEndSec": { "type": "number" },
+        "textChunkHash": { "type": "string" },
+        "summary": { "type": "string" },
+        "difficulty": { "type": "string", "enum": ["E", "M", "H"] },
+        "aiSource": {
+            "type": "object",
+            "properties": {
+                "model": { "type": "string" },
+                "promptVersion": { "type": "string" }
+            }
         }
       },
-      "required": [
-        "id",
-        "videoId",
-        "tStartSec",
-        "tEndSec"
-      ]
+      "required": ["tStartSec", "tEndSec", "textChunkHash", "difficulty"]
     },
     "Question": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Question",
       "type": "object",
-      "description": "Represents a question associated with a video segment.",
+      "description": "Represents an AI-generated multiple-choice question for a video segment.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the question."
+        "stem": { "type": "string" },
+        "options": { "type": "array", "items": { "type": "string" }, "maxItems": 4, "minItems": 4 },
+        "correctIndex": { "type": "number" },
+        "rationale": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "difficulty": { "type": "string", "enum": ["E", "M", "H"] },
+        "grounding": {
+            "type": "object",
+            "properties": {
+                "quote": { "type": "string" },
+                "offset": { "type": "number" }
+            }
         },
-        "segmentId": {
-          "type": "string",
-          "description": "Reference to Segment. (Relationship: Segment 1:N Question)"
-        },
-        "stem": {
-          "type": "string",
-          "description": "The question text."
-        },
-        "options": {
-          "type": "array",
-          "description": "Array of answer options.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "correctIndex": {
-          "type": "number",
-          "description": "Index of the correct answer option in the options array."
-        },
-        "rationale": {
-          "type": "string",
-          "description": "Explanation of why the correct answer is correct."
-        },
-        "tags": {
-          "type": "array",
-          "description": "Array of tags associated with the question (e.g., topic, difficulty).",
-          "items": {
-            "type": "string"
-          }
-        },
-        "difficulty": {
-          "type": "string",
-          "description": "Difficulty level of the question (e.g., 'easy', 'medium', 'hard')."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the question was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the question was last updated.",
-          "format": "date-time"
-        }
+        "version": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "segmentId",
-        "stem",
-        "options",
-        "correctIndex",
-        "rationale"
-      ]
+      "required": ["stem", "options", "correctIndex", "difficulty", "version"]
     },
     "Assignment": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Assignment",
       "type": "object",
-      "description": "Represents an assignment of a playlist to a class.",
+      "description": "Represents the assignment of a playlist to a cohort.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the assignment."
+        "coachId": { "type": "string" },
+        "playlistId": { "type": "string" },
+        "title": { "type": "string" },
+        "cohortId": { "type": "string" },
+        "startAt": { "type": "string", "format": "date-time" },
+        "endAt": { "type": "string", "format": "date-time" },
+        "rules": {
+          "type": "object",
+          "properties": {
+            "minWatchPct": { "type": "number" },
+            "minScore": { "type": "number" },
+            "attemptLimit": { "type": "number" }
+          }
         },
-        "orgId": {
-          "type": "string",
-          "description": "Reference to Organization. (Relationship: Organization 1:N Assignment)"
+        "antiSkip": {
+            "type": "object",
+            "properties": {
+                "seekLock": { "type": "boolean" },
+                "attentionChecks": { "type": "boolean" }
+            }
         },
-        "playlistId": {
-          "type": "string",
-          "description": "Reference to Playlist. (Relationship: Assignment 1:1 Playlist)"
-        },
-        "classId": {
-          "type": "string",
-          "description": "Reference to Class. (Relationship: Assignment 1:1 Class)"
-        },
-        "startAt": {
-          "type": "string",
-          "description": "Date and time when the assignment starts.",
-          "format": "date-time"
-        },
-        "endAt": {
-          "type": "string",
-          "description": "Date and time when the assignment ends.",
-          "format": "date-time"
-        },
-        "watchPct": {
-          "type": "number",
-          "description": "Minimum percentage of the video that must be watched."
-        },
-        "minScore": {
-          "type": "number",
-          "description": "Minimum quiz score required to complete the assignment."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the assignment was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the assignment was last updated.",
-          "format": "date-time"
-        }
+        "status": { "type": "string", "enum": ["draft", "published", "archived"] },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "orgId",
-        "playlistId",
-        "classId",
-        "startAt",
-        "endAt"
-      ]
+      "required": ["coachId", "playlistId", "title", "cohortId", "rules", "antiSkip", "status", "createdBy"]
     },
-    "Progress": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "Progress",
+    "Enrollment": {
+      "title": "Enrollment",
       "type": "object",
-      "description": "Represents a student's progress on an assignment.",
+      "description": "Represents a user's enrollment in an assignment.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the progress record."
-        },
-        "userId": {
-          "type": "string",
-          "description": "Reference to User. (Relationship: User 1:N Progress)"
-        },
-        "assignmentId": {
-          "type": "string",
-          "description": "Reference to Assignment. (Relationship: Assignment 1:N Progress)"
-        },
-        "videoId": {
-          "type": "string",
-          "description": "Reference to Video. (Relationship: Video 1:N Progress)"
-        },
-        "segmentId": {
-          "type": "string",
-          "description": "Reference to Segment. (Relationship: Segment 1:N Progress)"
-        },
-        "watchPct": {
-          "type": "number",
-          "description": "Percentage of the video watched."
-        },
-        "score": {
-          "type": "number",
-          "description": "Quiz score for the video."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the progress record was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the progress record was last updated.",
-          "format": "date-time"
-        }
+        "coachId": { "type": "string" },
+        "assignmentId": { "type": "string" },
+        "cohortId": { "type": "string" },
+        "userId": { "type": "string" },
+        "role": { "type": "string", "enum": ["student"] },
+        "enrolledAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "userId",
-        "assignmentId",
-        "videoId",
-        "segmentId"
-      ]
+      "required": ["coachId", "assignmentId", "cohortId", "userId", "role", "enrolledAt"]
     },
     "Attempt": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "Attempt",
       "type": "object",
-      "description": "Represents a student's attempt to answer a question.",
+      "description": "Represents a single attempt at a question by a user.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the attempt record."
-        },
-        "userId": {
-          "type": "string",
-          "description": "Reference to User. (Relationship: User 1:N Attempt)"
-        },
-        "questionId": {
-          "type": "string",
-          "description": "Reference to Question. (Relationship: Question 1:N Attempt)"
-        },
-        "chosenIndex": {
-          "type": "number",
-          "description": "Index of the answer option chosen by the student."
-        },
-        "isCorrect": {
-          "type": "boolean",
-          "description": "Indicates whether the student's answer was correct."
-        },
-        "latencyMs": {
-          "type": "number",
-          "description": "Latency of the student's response in milliseconds."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the attempt record was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the attempt record was last updated.",
-          "format": "date-time"
+        "coachId": { "type": "string" },
+        "userId": { "type": "string" },
+        "assignmentId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "segmentId": { "type": "string" },
+        "questionId": { "type": "string" },
+        "chosenIndex": { "type": "number" },
+        "isCorrect": { "type": "boolean" },
+        "latencyMs": { "type": "number" },
+        "ts": { "type": "string", "format": "date-time" },
+        "deviceInfo": {
+            "type": "object",
+            "properties": {
+                "ua": { "type": "string" },
+                "ipCountry": { "type": "string" }
+            }
         }
       },
-      "required": [
-        "id",
-        "userId",
-        "questionId",
-        "chosenIndex",
-        "isCorrect"
-      ]
+      "required": ["coachId", "userId", "assignmentId", "videoId", "segmentId", "questionId", "chosenIndex", "isCorrect", "latencyMs", "ts"]
     },
-    "SubscriptionPlan": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "SubscriptionPlan",
+    "Progress": {
+      "title": "Progress",
       "type": "object",
-      "description": "Represents a subscription plan for teachers with different features and limits.",
+      "description": "Tracks a student's progress on a video or playlist.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the subscription plan."
-        },
-        "name": {
-          "type": "string",
-          "description": "Name of the subscription plan (e.g., 'Free', 'Pro', 'Enterprise')."
-        },
-        "description": {
-          "type": "string",
-          "description": "Description of the subscription plan and its benefits."
-        },
-        "price": {
-          "type": "number",
-          "description": "Price of the subscription plan per month."
-        },
-        "maxStudents": {
-          "type": "number",
-          "description": "Maximum number of students allowed in this plan."
-        },
-        "maxPlaylists": {
-          "type": "number",
-          "description": "Maximum number of playlists allowed in this plan."
-        },
-        "enableQuizGeneration": {
-          "type": "boolean",
-          "description": "Indicates whether the quiz generation feature is enabled for this plan."
-        },
-        "enableProgressTracking": {
-          "type": "boolean",
-          "description": "Indicates whether the student progress tracking feature is enabled for this plan."
-        },
-        "enableAntiSkip": {
-          "type": "boolean",
-          "description": "Indicates whether anti-skip controls are enabled for this plan."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the subscription plan was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the subscription plan was last updated.",
-          "format": "date-time"
+        "coachId": { "type": "string" },
+        "userId": { "type": "string" },
+        "assignmentId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "watchPct": { "type": "number" },
+        "scorePct": { "type": "number" },
+        "segmentsCompleted": { "type": "number" },
+        "lastEventAt": { "type": "string", "format": "date-time" },
+        "integrity": {
+            "type": "object",
+            "properties": {
+                "seeksForward": { "type": "number" },
+                "tabBlurs": { "type": "number" },
+                "flags": { "type": "array", "items": { "type": "string" } }
+            }
         }
       },
-      "required": [
-        "id",
-        "name",
-        "price",
-        "maxStudents",
-        "maxPlaylists"
-      ]
+      "required": ["coachId", "userId", "assignmentId", "watchPct", "scorePct", "segmentsCompleted", "lastEventAt"]
     },
-    "TeacherSubscription": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "title": "TeacherSubscription",
+    "Event": {
+      "title": "Event",
       "type": "object",
-      "description": "Represents a teacher's subscription to a specific plan.",
+      "description": "Raw telemetry event for detailed analytics.",
       "properties": {
-        "id": {
-          "type": "string",
-          "description": "Unique identifier for the teacher subscription."
-        },
-        "userId": {
-          "type": "string",
-          "description": "Reference to User (Teacher). (Relationship: User 1:N TeacherSubscription)"
-        },
-        "subscriptionPlanId": {
-          "type": "string",
-          "description": "Reference to SubscriptionPlan. (Relationship: SubscriptionPlan 1:N TeacherSubscription)"
-        },
-        "startDate": {
-          "type": "string",
-          "description": "Date when the subscription started.",
-          "format": "date-time"
-        },
-        "endDate": {
-          "type": "string",
-          "description": "Date when the subscription ends.",
-          "format": "date-time"
-        },
-        "paymentMethod": {
-          "type": "string",
-          "description": "Payment method used for the subscription (e.g., 'credit card', 'manual bank transfer')."
-        },
-        "transactionId": {
-          "type": "string",
-          "description": "Transaction ID for manual bank transfer payments."
-        },
-        "paymentStatus": {
-          "type": "string",
-          "description": "Status of the payment (e.g., 'pending', 'approved', 'rejected')."
-        },
-        "createdAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the teacher subscription was created.",
-          "format": "date-time"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Timestamp indicating when the teacher subscription was last updated.",
-          "format": "date-time"
-        }
+        "coachId": { "type": "string" },
+        "userId": { "type": "string" },
+        "assignmentId": { "type": "string" },
+        "videoId": { "type": "string" },
+        "segmentId": { "type": "string" },
+        "type": { "type": "string", "enum": ["start", "pause", "quizShown", "answer", "seek", "segmentDone", "attention"] },
+        "payload": { "type": "object" },
+        "ts": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "id",
-        "userId",
-        "subscriptionPlanId",
-        "startDate",
-        "endDate"
-      ]
+      "required": ["coachId", "userId", "type", "ts"]
+    },
+    "Note": {
+        "title": "Note",
+        "type": "object",
+        "description": "A user's note on a video or segment.",
+        "properties": {
+            "coachId": { "type": "string" },
+            "userId": { "type": "string" },
+            "videoId": { "type": "string" },
+            "segmentId": { "type": "string" },
+            "text": { "type": "string" },
+            "ts": { "type": "string", "format": "date-time" }
+        },
+        "required": ["coachId", "userId", "text", "ts"]
+    },
+    "Certificate": {
+        "title": "Certificate",
+        "type": "object",
+        "description": "An issued certificate for a user.",
+        "properties": {
+            "coachId": { "type": "string" },
+            "userId": { "type": "string" },
+            "kind": {"type": "string", "enum": ["MindMaster", "TechStarter", "PlaylistCompletion"]},
+            "payload": {
+                "type": "object",
+                "properties": {
+                    "playlistId": { "type": "string" },
+                    "scorePct": { "type": "number" }
+                }
+            },
+            "issuedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["coachId", "userId", "kind", "issuedAt"]
+    },
+    "Resource": {
+        "title": "Resource",
+        "type": "object",
+        "description": "A learning resource like a book or PDF.",
+        "properties": {
+            "coachId": { "type": "string" },
+            "type": { "type": "string", "enum": ["book", "sheet", "promptDeck"] },
+            "title": { "type": "string" },
+            "url": { "type": "string", "format": "uri" },
+            "tags": { "type": "array", "items": { "type": "string" } },
+            "gradeBand": { "type": "string", "enum": ["G1-2", "G3-5", "G6-8"] }
+        },
+        "required": ["coachId", "type", "title", "url"]
+    },
+    "Subscription": {
+        "title": "Subscription",
+        "type": "object",
+        "description": "A coach's subscription plan.",
+        "properties": {
+            "coachId": { "type": "string" },
+            "tier": { "type": "string", "enum": ["free", "pro", "enterprise"] },
+            "seatLimit": { "type": "number" },
+            "status": { "type": "string", "enum": ["active", "past_due", "canceled"] },
+            "currentPeriodEnd": { "type": "string", "format": "date-time" },
+            "provider": { "type": "string" },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "updatedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["coachId", "tier", "seatLimit", "status", "currentPeriodEnd"]
+    },
+    "Payment": {
+        "title": "Payment",
+        "type": "object",
+        "description": "A record of a payment transaction.",
+        "properties": {
+            "coachId": { "type": "string" },
+            "userId": { "type": "string" },
+            "amount": { "type": "number" },
+            "currency": { "type": "string", "enum": ["PKR", "USD"] },
+            "status": { "type": "string", "enum": ["succeeded", "failed", "pending"] },
+            "gatewayRef": { "type": "string" },
+            "ts": { "type": "string", "format": "date-time" }
+        },
+        "required": ["coachId", "amount", "currency", "status", "gatewayRef", "ts"]
+    },
+    "Audit": {
+        "title": "Audit",
+        "type": "object",
+        "description": "An audit log entry for tracking actions.",
+        "properties": {
+            "coachId": { "type": "string" },
+            "actorId": { "type": "string" },
+            "action": { "type": "string" },
+            "target": {
+                "type": "object",
+                "properties": {
+                    "collection": { "type": "string" },
+                    "id": { "type": "string" }
+                }
+            },
+            "meta": { "type": "object" },
+            "ts": { "type": "string", "format": "date-time" }
+        },
+        "required": ["coachId", "actorId", "action", "target", "ts"]
     }
   },
   "auth": {
     "providers": [
-      "password",
-      "anonymous"
-    ]
+      "password"
+    ],
+    "customClaims": ["role", "coachId"]
   },
   "firestore": {
-    "structure": [
-      {
-        "path": "/organizations/{orgId}",
-        "definition": {
-          "entityName": "Organization",
-          "schema": {
-            "$ref": "#/backend/entities/Organization"
-          },
-          "description": "Stores organization details. Root level access control based on organization ID.",
-          "params": [
-            {
-              "name": "orgId",
-              "description": "Unique identifier for the organization."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/users/{userId}",
-        "definition": {
-          "entityName": "User",
-          "schema": {
-            "$ref": "#/backend/entities/User"
-          },
-          "description": "Stores user details, including role (teacher, student, admin) and organization ID. Used for authentication and authorization.",
-          "params": [
-            {
-              "name": "userId",
-              "description": "Unique identifier for the user."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/classes/{classId}",
-        "definition": {
-          "entityName": "Class",
-          "schema": {
-            "$ref": "#/backend/entities/Class"
-          },
-          "description": "Stores class details, including organization ID and teacher IDs.",
-          "params": [
-            {
-              "name": "classId",
-              "description": "Unique identifier for the class."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/playlists/{playlistId}",
-        "definition": {
-          "entityName": "Playlist",
-          "schema": {
-            "$ref": "#/backend/entities/Playlist"
-          },
-          "description": "Stores playlist details, including organization ID and class IDs.",
-          "params": [
-            {
-              "name": "playlistId",
-              "description": "Unique identifier for the playlist."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/videos/{videoId}",
-        "definition": {
-          "entityName": "Video",
-          "schema": {
-            "$ref": "#/backend/entities/Video"
-          },
-          "description": "Stores video details, including organization ID.",
-          "params": [
-            {
-              "name": "videoId",
-              "description": "Unique identifier for the video."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/videos/{videoId}/segments/{segmentId}",
-        "definition": {
-          "entityName": "Segment",
-          "schema": {
-            "$ref": "#/backend/entities/Segment"
-          },
-          "description": "Stores segment details for a video.",
-          "params": [
-            {
-              "name": "videoId",
-              "description": "Unique identifier for the video."
-            },
-            {
-              "name": "segmentId",
-              "description": "Unique identifier for the segment."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/videos/{videoId}/segments/{segmentId}/questions/{questionId}",
-        "definition": {
-          "entityName": "Question",
-          "schema": {
-            "$ref": "#/backend/entities/Question"
-          },
-          "description": "Stores question details for a video segment.",
-          "params": [
-            {
-              "name": "videoId",
-              "description": "Unique identifier for the video."
-            },
-            {
-              "name": "segmentId",
-              "description": "Unique identifier for the segment."
-            },
-            {
-              "name": "questionId",
-              "description": "Unique identifier for the question."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/assignments/{assignmentId}",
-        "definition": {
-          "entityName": "Assignment",
-          "schema": {
-            "$ref": "#/backend/entities/Assignment"
-          },
-          "description": "Stores assignment details, including organization ID, playlist ID, and class ID.",
-          "params": [
-            {
-              "name": "assignmentId",
-              "description": "Unique identifier for the assignment."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/progress/{progressId}",
-        "definition": {
-          "entityName": "Progress",
-          "schema": {
-            "$ref": "#/backend/entities/Progress"
-          },
-          "description": "Stores student progress for an assignment.",
-          "params": [
-            {
-              "name": "progressId",
-              "description": "Unique identifier for the progress record."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/attempts/{attemptId}",
-        "definition": {
-          "entityName": "Attempt",
-          "schema": {
-            "$ref": "#/backend/entities/Attempt"
-          },
-          "description": "Stores student attempts to answer questions.",
-          "params": [
-            {
-              "name": "attemptId",
-              "description": "Unique identifier for the attempt record."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/subscription_plans/{subscriptionPlanId}",
-        "definition": {
-          "entityName": "SubscriptionPlan",
-          "schema": {
-            "$ref": "#/backend/entities/SubscriptionPlan"
-          },
-          "description": "Stores subscription plan details, including features and limits. Accessible by admins.",
-          "params": [
-            {
-              "name": "subscriptionPlanId",
-              "description": "Unique identifier for the subscription plan."
-            }
-          ]
-        }
-      },
-      {
-        "path": "/teacher_subscriptions/{teacherSubscriptionId}",
-        "definition": {
-          "entityName": "TeacherSubscription",
-          "schema": {
-            "$ref": "#/backend/entities/TeacherSubscription"
-          },
-          "description": "Stores teacher subscriptions to specific plans, including payment information.  Includes denormalized 'userId' for authorization independence.",
-          "params": [
-            {
-              "name": "teacherSubscriptionId",
-              "description": "Unique identifier for the teacher subscription."
-            }
-          ]
-        }
-      }
-    ],
-    "reasoning": "This Firestore structure is designed to support iLearn's core features: assigning YouTube playlists, intelligent video pauses with AI-generated quizzes, progress tracking, and anti-skip controls. It prioritizes authorization independence through denormalization and structural segregation for simplified security rules and scalable list operations.\n\nKey structural decisions and how they support the core design principles:\n\n1.  **Authorization Independence (CRITICAL):**\n\n    *   **Denormalization:** The `orgId` is present on almost every collection. This ensures that security rules can always verify that a user has access to a resource within their organization without needing to perform expensive `get()` operations to traverse the data hierarchy. The `User` document also contains `role` information, eliminating the need to check a separate roles collection for basic authorization.\n    *   For `TeacherSubscription`, the `userId` is included, enabling direct rule-based access control for teachers.\n2.  **Clarity of Intent (Debuggability):**\n\n    *   Clear path naming (e.g., `/users/{userId}/progress/{progressId}`) makes the data relationships immediately obvious.\n    *   The structure avoids mixing different types of data in the same collection.\n3.  **DBAC (No Custom Claims):**\n\n    *   User roles (`teacher`, `student`, `admin`) are stored directly in the `/users/{userId}` document, adhering to the DBAC principle.\n4.  **QAPs (Rules are not Filters):**\n\n    *   Structural segregation is used to support secure `list` operations. For example, listing playlists is always scoped to the `orgId` contained within the playlist document.  Denormalization ensures that we never need to filter based on data from related documents, making `list` operations secure and efficient.\n5.  **Invariants:**\n\n    *   Timestamps (`createdAt`, `updatedAt`) are included in all relevant documents to track data changes and maintain data integrity.\n\nSpecific features addressed:\n\n*   **Admin Roles:** The `users` collection stores the `role` field for each user, including admins.  Security rules will check this field to grant admin-level access to specific resources (e.g., creating subscription plans).\n*   **Subscription Plans:** The `/subscription_plans` collection stores details about each plan, including features and limits.\n*   **Teacher Subscriptions:** The `/teacher_subscriptions` collection links teachers to specific subscription plans. This collection also tracks payment information and status, which is crucial for manual approval of bank transfers by the admin.\n*   **Feature Gating:**  The `enableQuizGeneration`, `enableProgressTracking`, and `enableAntiSkip` boolean fields in the `/subscription_plans` documents enable feature gating. Frontend and backend code can check these flags to enable/disable features based on the teacher's current subscription plan.\n*   **Manual Bank Transfers:** The `paymentMethod`, `transactionId`, and `paymentStatus` fields in the `/teacher_subscriptions` collection support manual bank transfers.  A separate admin UI will allow admins to view pending transactions and update the `paymentStatus` field after verification."
+    "/coaches/{coachId}": { "schema": { "$ref": "#/entities/Coach" }, "description": "Stores details for each coach (tenant)." },
+    "/users/{userId}": { "schema": { "$ref": "#/entities/User" }, "description": "Stores all users across all coaches." },
+    "/invites/{inviteId}": { "schema": { "$ref": "#/entities/Invite" }, "description": "Stores user invitations." },
+    "/cohorts/{cohortId}": { "schema": { "$ref": "#/entities/Cohort" }, "description": "Stores coach's classes/groups." },
+    "/cohorts/{cohortId}/members/{userId}": { "schema": { "$ref": "#/entities/CohortMember" }, "description": "Maps users to cohorts." },
+    "/playlists/{playlistId}": { "schema": { "$ref": "#/entities/Playlist" }, "description": "Stores learning playlists." },
+    "/videos/{videoId}": { "schema": { "$ref": "#/entities/Video" }, "description": "Stores video metadata." },
+    "/videos/{videoId}/segments/{segmentId}": { "schema": { "$ref": "#/entities/Segment" }, "description": "Stores video segments." },
+    "/videos/{videoId}/segments/{segmentId}/questions/{questionId}": { "schema": { "$ref": "#/entities/Question" }, "description": "Stores questions for segments." },
+    "/assignments/{assignmentId}": { "schema": { "$ref": "#/entities/Assignment" }, "description": "Stores assignments of playlists to cohorts." },
+    "/enrollments/{enrollmentId}": { "schema": { "$ref": "#/entities/Enrollment" }, "description": "Tracks student enrollment in assignments." },
+    "/attempts/{attemptId}": { "schema": { "$ref": "#/entities/Attempt" }, "description": "Logs student answers to questions." },
+    "/progress/{progressId}": { "schema": { "$ref": "#/entities/Progress" }, "description": "Tracks student progress through assignments." },
+    "/events/{eventId}": { "schema": { "$ref": "#/entities/Event" }, "description": "Raw telemetry events." },
+    "/notes/{noteId}": { "schema": { "$ref": "#/entities/Note" }, "description": "User notes on videos." },
+    "/certificates/{certificateId}": { "schema": { "$ref": "#/entities/Certificate" }, "description": "Issued certificates." },
+    "/resources/{resourceId}": { "schema": { "$ref": "#/entities/Resource" }, "description": "Shared learning resources." },
+    "/subscriptions/{subId}": { "schema": { "$ref": "#/entities/Subscription" }, "description": "Coach subscription details." },
+    "/payments/{paymentId}": { "schema": { "$ref": "#/entities/Payment" }, "description": "Payment transaction records." },
+    "/audit/{auditId}": { "schema": { "$ref": "#/entities/Audit" }, "description": "Audit trail for important actions." },
+    "/settings/{coachId}": { "schema": { "$ref": "#/entities/Coach/properties/settings" }, "description": "Mirrored settings for quick client-side reads." }
   }
 }
+
+    

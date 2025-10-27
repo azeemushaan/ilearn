@@ -1,317 +1,325 @@
 /**
- * @fileOverview Firestore Security Rules for the iLearn platform.
+ * @fileoverview Firestore Security Rules for iLearn (ER21) application.
  *
  * Core Philosophy:
- * This ruleset enforces a user-ownership and role-based access control model. Most data is scoped to an organization, and users can only access data within their organization. Teachers have additional privileges within their classes. Administrative access is granted based on the 'role' field in the user document.
+ * This ruleset enforces a multi-tenant security model where each coach (organization) has isolated data access.
+ * Users are assigned roles (admin, teacher, student) within their coach's context, and access is granted based on these roles and the coachId.
  *
  * Data Structure:
- * The Firestore database is organized as follows:
- * - /organizations/{orgId}: Stores organization details.
- * - /users/{userId}: Stores user details, including role and orgId.
- * - /classes/{classId}: Stores class details, including orgId and teacherIds.
- * - /playlists/{playlistId}: Stores playlist details, including orgId and classIds.
- * - /videos/{videoId}: Stores video details, including orgId.
- * - /videos/{videoId}/segments/{segmentId}: Stores video segments.
- * - /videos/{videoId}/segments/{segmentId}/questions/{questionId}: Stores questions for video segments.
- * - /assignments/{assignmentId}: Stores assignment details, including orgId, playlistId, and classId.
- * - /progress/{progressId}: Stores student progress on assignments.
- * - /attempts/{attemptId}: Stores student attempts to answer questions.
- * - /subscription_plans/{subscriptionPlanId}: Stores subscription plan details (admin-only).
- * - /teacher_subscriptions/{teacherSubscriptionId}: Stores teacher subscriptions.
- * - /settings/theme: Stores the theme settings (publicly readable).
+ * - Top-level collections are: /organizations, /users, /classes, /playlists, /videos, /assignments, /progress, /attempts, /subscription_plans, /teacher_subscriptions.
+ * - Most documents are scoped to a specific coach (organization) using a `coachId` or `orgId` field.
+ * - Subcollections (e.g., /videos/{videoId}/segments/{segmentId}/questions/{questionId}) inherit the coach's scope from their parent documents.
  *
  * Key Security Decisions:
- * - Strict ownership for user-related data: Users can only access their own user document.
- * - Organization-scoped access: Most data is scoped to an organization, and users can only access data within their organization.
- * - Role-based access: Admins have additional privileges, such as creating subscription plans.
- * - Public read access for settings: The /settings/theme document is publicly readable.
- * - Listing of user documents is disallowed for privacy reasons.
+ * - Strict ownership: Most write operations require the user to be an admin or teacher within the relevant coach's organization.
+ * - User listing is generally disallowed to protect user privacy.
+ * - Role-Based Access Control (RBAC):  Admin and Teacher roles are used to control access to various resources.
  *
  * Denormalization for Authorization:
- * The `orgId` field is present on almost every collection to avoid costly `get()` operations. The `User` document contains `role` information to avoid separate role lookups.
- * TeacherSubscription includes the `userId` for simpler rule-based access.
- *
- * Structural Segregation:
- * Private user data and public settings data are stored in separate collections to simplify access control and improve performance.
+ * - The `orgId` field is present in most documents to enable efficient authorization checks without requiring additional reads.
+ * - The `User` document contains the user's `role` within the organization.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Allows anyone to read the theme settings.
-     * @path /settings/theme
-     * @allow get, list: if true
-     * @deny create, update, delete: if false
-     * @principle Allows public read access to the theme settings.
-     */
-    match /settings/theme {
-      allow get: if true;
-      allow list: if true;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to organization data.
-     * @path /organizations/{orgId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if false
-     * @principle Restricts write access to organizations.
-     */
-    match /organizations/{orgId} {
-      allow get: if isSignedIn();
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to user data.
-     * @path /users/{userId}
-     * @allow get: if isOwner(userId)
-     * @allow create: if isSelfCreation(userId)
-     * @allow update: if isExistingOwner(userId)
-     * @allow delete: if false
-     * @allow list: if false
-     * @principle Enforces document ownership for user data.
-     */
-    match /users/{userId} {
-      allow get: if isOwner(userId);
-      allow list: if false;
-      allow create: if isSelfCreation(userId);
-      allow update: if isExistingOwner(userId);
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to class data.
-     * @path /classes/{classId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Requires user to be signed in for read access.
-     */
-    match /classes/{classId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to playlist data.
-     * @path /playlists/{playlistId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Requires user to be signed in for read access.
-     */
-    match /playlists/{playlistId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to video data.
-     * @path /videos/{videoId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Requires user to be signed in for read access.
-     */
-    match /videos/{videoId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to segment data within a video.
-     * @path /videos/{videoId}/segments/{segmentId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Requires user to be signed in for read access.
-     */
-    match /videos/{videoId}/segments/{segmentId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to question data within a video segment.
-     * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Requires user to be signed in for read access.
-     */
-    match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to assignment data.
-     * @path /assignments/{assignmentId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Requires user to be signed in for read access.
-     */
-    match /assignments/{assignmentId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to progress data.
-     * @path /progress/{progressId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Requires user to be signed in for read access.
-     */
-    match /progress/{progressId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to attempt data.
-     * @path /attempts/{attemptId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Requires user to be signed in for read access.
-     */
-    match /attempts/{attemptId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-   /**
-     * @description Manages access to subscription plan data.
-     * @path /subscription_plans/{subscriptionPlanId}
-     * @allow get: if isSignedIn()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     */
-    match /subscription_plans/{subscriptionPlanId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to teacher subscription data.
-     * @path /teacher_subscriptions/{teacherSubscriptionId}
-     * @allow get: if isTeacherSubscriptionOwner()
-     * @allow create: if false
-     * @allow update: if false
-     * @allow delete: if false
-     * @allow list: if isSignedIn()
-     * @principle Restricts write access and allows read access to the owner.
-     */
-    match /teacher_subscriptions/{teacherSubscriptionId} {
-      allow get: if isTeacherSubscriptionOwner();
-      allow list: if isSignedIn();
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    // ----- Helper functions -----
-
-    /**
-     * @description Checks if the user is signed in.
-     * @return {boolean} True if the user is signed in, false otherwise.
+     * @description Checks if the request is authenticated.
+     * @param {void}
+     * @return {bool} True if the request is authenticated, false otherwise.
      */
     function isSignedIn() {
       return request.auth != null;
     }
 
     /**
-     * @description Checks if the user is the owner of the document.
-     * @param {string} userId - The user ID to check.
-     * @return {boolean} True if the user is the owner, false otherwise.
+     * @description Gets the coachId from the authentication token.
+     * @param {void}
+     * @return {string} The coachId from the authentication token.
+     */
+    function coach() {
+      return request.auth.token.coachId;
+    }
+
+    /**
+     * @description Gets the role from the authentication token.
+     * @param {void}
+     * @return {string} The role from the authentication token.
+     */
+    function role() {
+      return request.auth.token.role;
+    }
+
+    /**
+     * @description Checks if the coachId in the request matches the resource's coachId.
+     * @param {string} resourceCoachId The coachId of the resource.
+     * @return {bool} True if the coachId in the request matches the resource's coachId, false otherwise.
+     */
+    function sameCoach(resourceCoachId) {
+      return coach() == resourceCoachId;
+    }
+
+    /**
+     * @description Checks if the user has the admin role.
+     * @param {void}
+     * @return {bool} True if the user has the admin role, false otherwise.
+     */
+    function isAdmin() {
+      return role() == 'admin';
+    }
+
+    /**
+     * @description Checks if the user has the teacher role.
+     * @param {void}
+     * @return {bool} True if the user has the teacher role, false otherwise.
+     */
+    function isTeacher() {
+      return role() == 'teacher';
+    }
+
+    /**
+     * @description Checks if the user has the student role.
+     * @param {void}
+     * @return {bool} True if the user has the student role, false otherwise.
+     */
+    function isStudent() {
+      return role() == 'student';
+    }
+
+    /**
+     * @description Checks if the user is the owner of the resource based on userId.
+     * @param {string} userId The userId to compare against the request's authentication UID.
+     * @return {bool} True if the user is the owner, false otherwise.
      */
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
     /**
-     * @description Checks if the user is creating their own user document.
-     * @param {string} userId - The user ID to check.
-     * @return {boolean} True if the user is creating their own document, false otherwise.
-     */
-    function isSelfCreation(userId) {
-        return isSignedIn() && request.auth.uid == userId && request.resource.data.id == userId;
-    }
-
-    /**
-     * @description Checks if the user is the owner of an existing document.
-     * @param {string} userId - The user ID to check.
-     * @return {boolean} True if the user is the owner and the document exists, false otherwise.
+     * @description Checks if the user is the owner of an existing resource based on userId.
+     *              This combines the ownership check with the existence check.
+     * @param {string} userId The userId to compare against the request's authentication UID.
+     * @return {bool} True if the user is the owner and the resource exists, false otherwise.
      */
     function isExistingOwner(userId) {
-      return isOwner(userId) && resource != null;
+      return isOwner(userId) && resource.data.userId == userId;
     }
 
     /**
-     * @description Checks if the authenticated user is the owner of the teacher subscription.
-     *  This rule checks the denormalized `userId` field on the `teacher_subscriptions` document against the `request.auth.uid`.
-     * @return {boolean} True if the user owns the subscription, false otherwise.
+     * @description Checks if the request contains required fields for authorization.
+     * @param {array} requiredFields An array of strings representing the required fields.
+     * @return {bool} True if all required fields are present, false otherwise.
      */
-    function isTeacherSubscriptionOwner() {
-      return isSignedIn() && request.auth.uid == resource.data.userId;
+    function hasAll(requiredFields) {
+      return requiredFields.forAll(field => request.resource.data.keys().hasAny([field]));
+    }
+
+    /**
+     * @description Rule for the /organizations/{orgId} collection.
+     * @path /organizations/{orgId}
+     * @allow (get) Authenticated user can read an organization.
+     * @deny (create) Only authenticated user can create an organization.
+     * @deny (update) Only authenticated user can update an organization.
+     * @deny (delete) Only authenticated user can delete an organization.
+     * @principle Enforces read access and prevents write access to non-owners.
+     */
+    match /organizations/{orgId} {
+      allow get: if isSignedIn();
+      allow list: if false; // Listing organizations is generally not allowed for security reasons.
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rule for the /users/{userId} collection.
+     * @path /users/{userId}
+     * @allow (get) An authenticated user can read their own user document.
+     * @allow (create) A user can create their own user document if the userId matches their auth UID and orgId is correctly set.
+     * @allow (update) An authenticated user can update their own user document.
+     * @deny (delete) Users cannot delete their own accounts via rules.
+     * @principle Enforces user-ownership and allows self-creation.
+     */
+    match /users/{userId} {
+      allow get: if isOwner(userId) && sameCoach(resource.data.coachId);
+      allow list: if false; // Disable listing for privacy
+      allow create: if isOwner(userId) && request.resource.data.coachId == coach() && request.resource.data.id == userId;
+      allow update: if isOwner(userId) && request.resource.data.coachId == coach();
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rule for the /classes/{classId} collection.
+     * @path /classes/{classId}
+     * @allow (get) Authenticated user can read a class if they are in the same organization.
+     * @allow (create) Admin or teacher can create a class in their organization.
+     * @allow (update) Admin or teacher can update a class in their organization.
+     * @allow (delete) Admin or teacher can delete a class in their organization.
+     * @principle Enforces org-level access control for classes.
+     */
+    match /classes/{classId} {
+      allow get: if isSignedIn() && sameCoach(resource.data.orgId);
+      allow list: if isSignedIn() && sameCoach(resource.data.orgId);
+      allow create: if (isAdmin() || isTeacher()) && sameCoach(request.resource.data.orgId);
+      allow update: if (isAdmin() || isTeacher()) && sameCoach(resource.data.orgId);
+      allow delete: if (isAdmin() || isTeacher()) && sameCoach(resource.data.orgId);
+    }
+
+    /**
+     * @description Rule for the /playlists/{playlistId} collection.
+     * @path /playlists/{playlistId}
+     * @allow (get) Authenticated user can read a playlist if they are in the same organization.
+     * @allow (create) Admin or teacher can create a playlist in their organization.
+     * @allow (update) Admin or teacher can update a playlist in their organization.
+     * @allow (delete) Admin or teacher can delete a playlist in their organization.
+     * @principle Enforces org-level access control for playlists.
+     */
+    match /playlists/{playlistId} {
+      allow get: if isSignedIn() && sameCoach(resource.data.coachId);
+      allow list: if isSignedIn() && sameCoach(resource.data.coachId);
+      allow create: if (isAdmin() || isTeacher()) && sameCoach(request.resource.data.coachId);
+      allow update: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+      allow delete: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+    }
+
+    /**
+     * @description Rule for the /videos/{videoId} collection.
+     * @path /videos/{videoId}
+     * @allow (get) Authenticated user can read a video if they are in the same organization.
+     * @allow (create) Admin or teacher can create a video in their organization.
+     * @allow (update) Admin or teacher can update a video in their organization.
+     * @allow (delete) Admin or teacher can delete a video in their organization.
+     * @principle Enforces org-level access control for videos.
+     */
+    match /videos/{videoId} {
+      allow get: if isSignedIn() && sameCoach(resource.data.coachId);
+      allow list: if isSignedIn() && sameCoach(resource.data.coachId);
+      allow create: if (isAdmin() || isTeacher()) && sameCoach(request.resource.data.coachId);
+      allow update: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+      allow delete: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+
+      /**
+       * @description Rule for the /videos/{videoId}/segments/{segmentId} collection.
+       * @path /videos/{videoId}/segments/{segmentId}
+       * @allow (get) Authenticated user can read a segment if they are in the same organization as the video.
+       * @allow (create) Admin or teacher can create a segment if they are in the same organization as the video.
+       * @allow (update) Admin or teacher can update a segment if they are in the same organization as the video.
+       * @allow (delete) Admin or teacher can delete a segment if they are in the same organization as the video.
+       * @principle Enforces org-level access control for video segments.
+       */
+      match /segments/{segmentId} {
+        allow get: if isSignedIn() && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+        allow list: if isSignedIn() && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+        allow create: if (isAdmin() || isTeacher()) && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+        allow update: if (isAdmin() || isTeacher()) && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+        allow delete: if (isAdmin() || isTeacher()) && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+
+        /**
+         * @description Rule for the /videos/{videoId}/segments/{segmentId}/questions/{questionId} collection.
+         * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
+         * @allow (get) Authenticated user can read a question if they are in the same organization as the video.
+         * @allow (create) Admin or teacher can create a question if they are in the same organization as the video.
+         * @allow (update) Admin or teacher can update a question if they are in the same organization as the video.
+         * @allow (delete) Admin or teacher can delete a question if they are in the same organization as the video.
+         * @principle Enforces org-level access control for video segment questions.
+         */
+        match /questions/{questionId} {
+          allow get: if isSignedIn() && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+          allow list: if isSignedIn() && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+          allow create: if (isAdmin() || isTeacher()) && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+          allow update: if (isAdmin() || isTeacher()) && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+          allow delete: if (isAdmin() || isTeacher()) && sameCoach(get(/databases/$(database)/documents/videos/$(videoId)).data.coachId);
+        }
+      }
+    }
+
+    /**
+     * @description Rule for the /assignments/{assignmentId} collection.
+     * @path /assignments/{assignmentId}
+     * @allow (get) Authenticated user can read an assignment if they are in the same organization.
+     * @allow (create) Admin or teacher can create an assignment in their organization.
+     * @allow (update) Admin or teacher can update an assignment in their organization.
+     * @allow (delete) Admin or teacher can delete an assignment in their organization.
+     * @principle Enforces org-level access control for assignments.
+     */
+    match /assignments/{assignmentId} {
+      allow get: if isSignedIn() && sameCoach(resource.data.coachId);
+      allow list: if isSignedIn() && sameCoach(resource.data.coachId);
+      allow create: if (isAdmin() || isTeacher()) && sameCoach(request.resource.data.coachId);
+      allow update: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+      allow delete: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+    }
+
+    /**
+     * @description Rule for the /progress/{progressId} collection.
+     * @path /progress/{progressId}
+     * @allow (get) Admin or teacher can read progress in their organization, students can read their own progress.
+     * @allow (create) Admin or teacher can create progress in their organization, students can create their own progress.
+     * @allow (update) Admin or teacher can update progress in their organization, students can update their own progress.
+     * @allow (delete) Admin or teacher can delete progress in their organization.
+     * @principle Enforces org-level access control for progress, allows student self-access.
+     */
+    match /progress/{progressId} {
+      allow get: if ((isAdmin() || isTeacher()) && sameCoach(resource.data.coachId)
+               || (isStudent() && isOwner(resource.data.userId)));
+      allow list: if ((isAdmin() || isTeacher()) && sameCoach(resource.data.coachId)
+               || (isStudent() && isOwner(resource.data.userId));
+      allow create: if ((isAdmin() || isTeacher()) && sameCoach(request.resource.data.coachId)
+                || (isStudent() && isOwner(request.resource.data.userId) && sameCoach(request.resource.data.coachId)));
+      allow update: if ((isAdmin() || isTeacher()) && sameCoach(resource.data.coachId)
+                || (isStudent() && isOwner(userId) && sameCoach(resource.data.coachId)));
+      allow delete: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+    }
+
+    /**
+     * @description Rule for the /attempts/{attemptId} collection.
+     * @path /attempts/{attemptId}
+     * @allow (create) Students can create their own attempts.
+     * @allow (get) Admin or teacher can read attempts in their organization.
+     * @deny (update) Attempts cannot be updated.
+     * @deny (delete) Attempts cannot be deleted.
+     * @principle Enforces student-ownership for creation, read access for admins/teachers.
+     */
+    match /attempts/{attemptId} {
+      allow get: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+      allow list: if (isAdmin() || isTeacher()) && sameCoach(resource.data.coachId);
+      allow create: if (isStudent() && isOwner(request.resource.data.userId) && sameCoach(request.resource.data.coachId));
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rule for the /subscription_plans/{subscriptionPlanId} collection.
+     * @path /subscription_plans/{subscriptionPlanId}
+     * @allow (get) Any authenticated user can read a subscription plan.
+     * @allow (create) Only admin can create a subscription plan.
+     * @allow (update) Only admin can update a subscription plan.
+     * @allow (delete) Only admin can delete a subscription plan.
+     * @principle Enforces admin-only access control for managing subscription plans.
+     */
+    match /subscription_plans/{subscriptionPlanId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    /**
+     * @description Rule for the /teacher_subscriptions/{teacherSubscriptionId} collection.
+     * @path /teacher_subscriptions/{teacherSubscriptionId}
+     * @allow (get) An authenticated teacher can read their own subscription details.
+     * @allow (create) Only admin can create a teacher subscription.
+     * @allow (update) Only admin can update a teacher subscription.
+     * @allow (delete) Only admin can delete a teacher subscription.
+     * @principle Enforces ownership for teachers, admin control for management.
+     */
+    match /teacher_subscriptions/{teacherSubscriptionId} {
+      allow get: if isTeacher() && resource.data.userId == request.auth.uid;
+      allow list: if false; // Disable listing
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
   }
 }
