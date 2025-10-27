@@ -16,7 +16,6 @@ import {
   PlaySquare,
   Users,
   BarChart3,
-  Settings,
   HelpCircle,
   LogOut,
 } from "lucide-react";
@@ -35,17 +34,17 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const auth = useAuth();
-  const { user, isUserLoading } = useUser();
+  const { user, isLoading: isUserLoading } = useUser();
   const router = useRouter();
   const firestore = useFirestore();
   const [userRole, setUserRole] = useState<string | null>(null);
 
   const userDocRef = useMemoFirebase(() => {
-    if (!user) return null;
+    if (!firestore || !user) return null;
     return doc(firestore, "users", user.uid);
   }, [firestore, user]);
 
-  const { data: userData } = useDoc(userDocRef);
+  const { data: userData, isLoading: isUserDataLoading } = useDoc(userDocRef);
 
   useEffect(() => {
     if (!isUserLoading && !user) {
@@ -63,8 +62,8 @@ export default function DashboardLayout({
     router.push("/login");
   };
 
-  if (isUserLoading || !userRole) {
-    return <div>Loading...</div>; // Or a proper loading spinner
+  if (isUserLoading || isUserDataLoading) {
+    return <div className="flex h-screen w-full items-center justify-center">Loading...</div>;
   }
 
   return (
@@ -114,14 +113,6 @@ export default function DashboardLayout({
         </SidebarContent>
         <SidebarFooter>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/settings">
-                  <Settings />
-                  <span>Settings</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton asChild>
                 <Link href="#">

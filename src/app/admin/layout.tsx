@@ -19,6 +19,7 @@ import {
   CreditCard,
   Package,
   Shield,
+  Users,
 } from "lucide-react";
 import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -35,13 +36,13 @@ export default function AdminDashboardLayout({
   children: React.ReactNode;
 }) {
   const auth = useAuth();
-  const { user, isUserLoading } = useUser();
+  const { user, isLoading: isUserLoading } = useUser();
   const router = useRouter();
   const firestore = useFirestore();
   const [userRole, setUserRole] = useState<string | null>(null);
 
   const userDocRef = useMemoFirebase(() => {
-    if (!user) return null;
+    if (!firestore || !user) return null;
     return doc(firestore, "users", user.uid);
   }, [firestore, user]);
 
@@ -57,7 +58,7 @@ export default function AdminDashboardLayout({
         if (role !== 'admin') {
             router.push('/dashboard');
         }
-    } else if (!isUserLoading && !isUserDataLoading && !userData) {
+    } else if (!isUserLoading && !isUserDataLoading && !userData && user) {
         // If user exists but no user document, they can't be admin
         router.push('/dashboard');
     }
@@ -71,7 +72,7 @@ export default function AdminDashboardLayout({
   };
 
   if (isUserLoading || isUserDataLoading || userRole !== 'admin') {
-    return <div>Loading and verifying admin access...</div>; 
+    return <div className="flex h-screen w-full items-center justify-center">Loading and verifying admin access...</div>; 
   }
 
   return (
@@ -87,7 +88,7 @@ export default function AdminDashboardLayout({
           <SidebarMenu>
              <SidebarMenuItem>
                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
-                    <Shield size={16} /> <span>Admin</span>
+                    <Shield size={16} /> <span>Admin Panel</span>
                  </div>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -96,6 +97,14 @@ export default function AdminDashboardLayout({
                     <Home />
                     <span>Dashboard</span>
                   </Link>
+                </SidebarMenuButton>
+            </SidebarMenuItem>
+             <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                <Link href="/admin/users">
+                    <Users />
+                    <span>Users</span>
+                </Link>
                 </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -114,18 +123,18 @@ export default function AdminDashboardLayout({
                 </Link>
                 </SidebarMenuButton>
             </SidebarMenuItem>
+             <SidebarMenuItem>
+              <SidebarMenuButton asChild>
+                <Link href="/admin/settings">
+                  <Settings />
+                  <span>Website Settings</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/settings">
-                  <Settings />
-                  <span>Settings</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton asChild>
                 <Link href="#">

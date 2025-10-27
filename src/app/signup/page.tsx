@@ -10,7 +10,7 @@ import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, Us
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
 
 const GoogleIcon = () => (
     <svg className="mr-2 h-4 w-4" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
@@ -38,20 +38,27 @@ export default function SignupPage() {
     }
   };
 
+  const createOrUpdateUserDocument = async (user: User, role: 'admin' | 'teacher', name: string) => {
+    const userRef = doc(firestore, "users", user.uid);
+    await setDoc(userRef, {
+      id: user.uid,
+      email: user.email,
+      firstName: name.split(' ')[0] || '',
+      lastName: name.split(' ')[1] || '',
+      role: role,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  }
+
   const handleGoogleSignup = async () => {
+    if(!auth || !firestore) return;
     const provider = new GoogleAuthProvider();
     try {
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
       
-      const userRef = doc(firestore, "users", user.uid);
-      await setDoc(userRef, {
-        id: user.uid,
-        email: user.email,
-        firstName: user.displayName?.split(' ')[0] || '',
-        lastName: user.displayName?.split(' ')[1] || '',
-        role: 'teacher' // Google signup always defaults to teacher
-      }, { merge: true });
+      await createOrUpdateUserDocument(user, 'teacher', user.displayName || '');
 
       await handleLoginSuccess(user);
     } catch (error: any) {
@@ -65,19 +72,13 @@ export default function SignupPage() {
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if(!auth || !firestore) return;
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-      const role = email === 'admin@ilearn.com' ? 'admin' : 'teacher';
+      const role = email.toLowerCase() === 'admin@ilearn.com' ? 'admin' : 'teacher';
 
-      const userRef = doc(firestore, "users", user.uid);
-      await setDoc(userRef, {
-        id: user.uid,
-        email: user.email,
-        firstName: name.split(' ')[0] || '',
-        lastName: name.split(' ')[1] || '',
-        role: role
-      }, { merge: true });
+      await createOrUpdateUserDocument(user, role, name);
 
       await handleLoginSuccess(user);
     } catch (error: any) {
