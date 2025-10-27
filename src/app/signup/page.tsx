@@ -38,10 +38,11 @@ export default function SignupPage() {
     }
   };
 
-  const createOrUpdateUserDocument = async (user: User, role: 'admin' | 'teacher', name: string) => {
+  const createOrUpdateUserDocument = async (user: User, name: string) => {
     if (!firestore) return;
     const userRef = doc(firestore, "users", user.uid);
-    
+    const role = user.email?.toLowerCase() === 'azeemushan4@gmail.com' ? 'admin' : 'teacher';
+
     let userData: any = {
       id: user.uid,
       email: user.email,
@@ -49,13 +50,13 @@ export default function SignupPage() {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
+    
+    const nameParts = name.split(' ');
+    userData.firstName = nameParts[0] || '';
+    userData.lastName = nameParts.slice(1).join(' ') || '';
 
     if (role === 'admin') {
         userData.firstName = 'Admin';
-        userData.lastName = '';
-    } else {
-        userData.firstName = name.split(' ')[0] || '';
-        userData.lastName = name.split(' ').slice(1).join(' ') || '';
     }
 
     await setDoc(userRef, userData, { merge: true });
@@ -68,7 +69,7 @@ export default function SignupPage() {
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
       
-      await createOrUpdateUserDocument(user, 'teacher', user.displayName || '');
+      await createOrUpdateUserDocument(user, user.displayName || '');
 
       await handleLoginSuccess(user);
     } catch (error: any) {
@@ -86,9 +87,8 @@ export default function SignupPage() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
-      const role = email.toLowerCase() === 'admin@ilearn.com' ? 'admin' : 'teacher';
-
-      await createOrUpdateUserDocument(user, role, name);
+      
+      await createOrUpdateUserDocument(user, name);
 
       await handleLoginSuccess(user);
     } catch (error: any) {
