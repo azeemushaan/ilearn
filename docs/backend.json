@@ -1,0 +1,837 @@
+{
+  "entities": {
+    "Organization": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Organization",
+      "type": "object",
+      "description": "Represents an organization, such as a school or district, using the iLearn platform.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the organization."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the organization."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the organization."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the organization was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the organization was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "User": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "User",
+      "type": "object",
+      "description": "Represents a user of the iLearn platform (teacher or student).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the user."
+        },
+        "orgId": {
+          "type": "string",
+          "description": "Reference to Organization. (Relationship: Organization 1:N User)"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the user.",
+          "format": "email"
+        },
+        "role": {
+          "type": "string",
+          "description": "Role of the user within the organization (e.g., 'teacher', 'student', 'admin')."
+        },
+        "firstName": {
+          "type": "string",
+          "description": "First name of the user."
+        },
+        "lastName": {
+          "type": "string",
+          "description": "Last name of the user."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the user was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the user was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "orgId",
+        "email",
+        "role"
+      ]
+    },
+    "Class": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Class",
+      "type": "object",
+      "description": "Represents a class or course within an organization.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the class."
+        },
+        "orgId": {
+          "type": "string",
+          "description": "Reference to Organization. (Relationship: Organization 1:N Class)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the class."
+        },
+        "teacherIds": {
+          "type": "array",
+          "description": "References to Teachers. (Relationship: Class N:N User)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the class was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the class was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "orgId",
+        "name"
+      ]
+    },
+    "Playlist": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Playlist",
+      "type": "object",
+      "description": "Represents a YouTube playlist assigned for learning.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the playlist."
+        },
+        "orgId": {
+          "type": "string",
+          "description": "Reference to Organization. (Relationship: Organization 1:N Playlist)"
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the playlist."
+        },
+        "youtubePlaylistId": {
+          "type": "string",
+          "description": "The YouTube Playlist ID."
+        },
+        "classIds": {
+          "type": "array",
+          "description": "References to Classes. (Relationship: Playlist N:N Class)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the playlist was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the playlist was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "orgId",
+        "title",
+        "youtubePlaylistId"
+      ]
+    },
+    "Video": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Video",
+      "type": "object",
+      "description": "Represents a video within a playlist.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the video."
+        },
+        "orgId": {
+          "type": "string",
+          "description": "Reference to Organization. (Relationship: Organization 1:N Video)"
+        },
+        "youtubeVideoId": {
+          "type": "string",
+          "description": "The YouTube Video ID."
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the video."
+        },
+        "duration": {
+          "type": "number",
+          "description": "Duration of the video in seconds."
+        },
+        "hasCaptions": {
+          "type": "boolean",
+          "description": "Indicates whether the video has captions available."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the video was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the video was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "orgId",
+        "youtubeVideoId",
+        "title"
+      ]
+    },
+    "Segment": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Segment",
+      "type": "object",
+      "description": "Represents a segment of a video (e.g., a chapter or time-based section).",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the segment."
+        },
+        "videoId": {
+          "type": "string",
+          "description": "Reference to Video. (Relationship: Video 1:N Segment)"
+        },
+        "tStartSec": {
+          "type": "number",
+          "description": "Start time of the segment in seconds."
+        },
+        "tEndSec": {
+          "type": "number",
+          "description": "End time of the segment in seconds."
+        },
+        "textChunkHash": {
+          "type": "string",
+          "description": "Hash of the text content of the segment."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the segment content."
+        },
+        "difficulty": {
+          "type": "string",
+          "description": "Difficulty level of the segment (e.g., 'easy', 'medium', 'hard')."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the segment was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the segment was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "videoId",
+        "tStartSec",
+        "tEndSec"
+      ]
+    },
+    "Question": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Question",
+      "type": "object",
+      "description": "Represents a question associated with a video segment.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the question."
+        },
+        "segmentId": {
+          "type": "string",
+          "description": "Reference to Segment. (Relationship: Segment 1:N Question)"
+        },
+        "stem": {
+          "type": "string",
+          "description": "The question text."
+        },
+        "options": {
+          "type": "array",
+          "description": "Array of answer options.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "correctIndex": {
+          "type": "number",
+          "description": "Index of the correct answer option in the options array."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Explanation of why the correct answer is correct."
+        },
+        "tags": {
+          "type": "array",
+          "description": "Array of tags associated with the question (e.g., topic, difficulty).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "difficulty": {
+          "type": "string",
+          "description": "Difficulty level of the question (e.g., 'easy', 'medium', 'hard')."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the question was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the question was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "segmentId",
+        "stem",
+        "options",
+        "correctIndex",
+        "rationale"
+      ]
+    },
+    "Assignment": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Assignment",
+      "type": "object",
+      "description": "Represents an assignment of a playlist to a class.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the assignment."
+        },
+        "orgId": {
+          "type": "string",
+          "description": "Reference to Organization. (Relationship: Organization 1:N Assignment)"
+        },
+        "playlistId": {
+          "type": "string",
+          "description": "Reference to Playlist. (Relationship: Assignment 1:1 Playlist)"
+        },
+        "classId": {
+          "type": "string",
+          "description": "Reference to Class. (Relationship: Assignment 1:1 Class)"
+        },
+        "startAt": {
+          "type": "string",
+          "description": "Date and time when the assignment starts.",
+          "format": "date-time"
+        },
+        "endAt": {
+          "type": "string",
+          "description": "Date and time when the assignment ends.",
+          "format": "date-time"
+        },
+        "watchPct": {
+          "type": "number",
+          "description": "Minimum percentage of the video that must be watched."
+        },
+        "minScore": {
+          "type": "number",
+          "description": "Minimum quiz score required to complete the assignment."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the assignment was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the assignment was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "orgId",
+        "playlistId",
+        "classId",
+        "startAt",
+        "endAt"
+      ]
+    },
+    "Progress": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Progress",
+      "type": "object",
+      "description": "Represents a student's progress on an assignment.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the progress record."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to User. (Relationship: User 1:N Progress)"
+        },
+        "assignmentId": {
+          "type": "string",
+          "description": "Reference to Assignment. (Relationship: Assignment 1:N Progress)"
+        },
+        "videoId": {
+          "type": "string",
+          "description": "Reference to Video. (Relationship: Video 1:N Progress)"
+        },
+        "segmentId": {
+          "type": "string",
+          "description": "Reference to Segment. (Relationship: Segment 1:N Progress)"
+        },
+        "watchPct": {
+          "type": "number",
+          "description": "Percentage of the video watched."
+        },
+        "score": {
+          "type": "number",
+          "description": "Quiz score for the video."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the progress record was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the progress record was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "assignmentId",
+        "videoId",
+        "segmentId"
+      ]
+    },
+    "Attempt": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Attempt",
+      "type": "object",
+      "description": "Represents a student's attempt to answer a question.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the attempt record."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to User. (Relationship: User 1:N Attempt)"
+        },
+        "questionId": {
+          "type": "string",
+          "description": "Reference to Question. (Relationship: Question 1:N Attempt)"
+        },
+        "chosenIndex": {
+          "type": "number",
+          "description": "Index of the answer option chosen by the student."
+        },
+        "isCorrect": {
+          "type": "boolean",
+          "description": "Indicates whether the student's answer was correct."
+        },
+        "latencyMs": {
+          "type": "number",
+          "description": "Latency of the student's response in milliseconds."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the attempt record was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the attempt record was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "questionId",
+        "chosenIndex",
+        "isCorrect"
+      ]
+    },
+    "SubscriptionPlan": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "SubscriptionPlan",
+      "type": "object",
+      "description": "Represents a subscription plan for teachers with different features and limits.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the subscription plan."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the subscription plan (e.g., 'Free', 'Pro', 'Enterprise')."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the subscription plan and its benefits."
+        },
+        "price": {
+          "type": "number",
+          "description": "Price of the subscription plan per month."
+        },
+        "maxStudents": {
+          "type": "number",
+          "description": "Maximum number of students allowed in this plan."
+        },
+        "maxPlaylists": {
+          "type": "number",
+          "description": "Maximum number of playlists allowed in this plan."
+        },
+        "enableQuizGeneration": {
+          "type": "boolean",
+          "description": "Indicates whether the quiz generation feature is enabled for this plan."
+        },
+        "enableProgressTracking": {
+          "type": "boolean",
+          "description": "Indicates whether the student progress tracking feature is enabled for this plan."
+        },
+        "enableAntiSkip": {
+          "type": "boolean",
+          "description": "Indicates whether anti-skip controls are enabled for this plan."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the subscription plan was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the subscription plan was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "price",
+        "maxStudents",
+        "maxPlaylists"
+      ]
+    },
+    "TeacherSubscription": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "TeacherSubscription",
+      "type": "object",
+      "description": "Represents a teacher's subscription to a specific plan.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the teacher subscription."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to User (Teacher). (Relationship: User 1:N TeacherSubscription)"
+        },
+        "subscriptionPlanId": {
+          "type": "string",
+          "description": "Reference to SubscriptionPlan. (Relationship: SubscriptionPlan 1:N TeacherSubscription)"
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Date when the subscription started.",
+          "format": "date-time"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "Date when the subscription ends.",
+          "format": "date-time"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method used for the subscription (e.g., 'credit card', 'manual bank transfer')."
+        },
+        "transactionId": {
+          "type": "string",
+          "description": "Transaction ID for manual bank transfer payments."
+        },
+        "paymentStatus": {
+          "type": "string",
+          "description": "Status of the payment (e.g., 'pending', 'approved', 'rejected')."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the teacher subscription was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp indicating when the teacher subscription was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "subscriptionPlanId",
+        "startDate",
+        "endDate"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/organizations/{orgId}",
+        "definition": {
+          "entityName": "Organization",
+          "schema": {
+            "$ref": "#/backend/entities/Organization"
+          },
+          "description": "Stores organization details. Root level access control based on organization ID.",
+          "params": [
+            {
+              "name": "orgId",
+              "description": "Unique identifier for the organization."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "User",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Stores user details, including role (teacher, student, admin) and organization ID. Used for authentication and authorization.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "Unique identifier for the user."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/classes/{classId}",
+        "definition": {
+          "entityName": "Class",
+          "schema": {
+            "$ref": "#/backend/entities/Class"
+          },
+          "description": "Stores class details, including organization ID and teacher IDs.",
+          "params": [
+            {
+              "name": "classId",
+              "description": "Unique identifier for the class."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/playlists/{playlistId}",
+        "definition": {
+          "entityName": "Playlist",
+          "schema": {
+            "$ref": "#/backend/entities/Playlist"
+          },
+          "description": "Stores playlist details, including organization ID and class IDs.",
+          "params": [
+            {
+              "name": "playlistId",
+              "description": "Unique identifier for the playlist."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/videos/{videoId}",
+        "definition": {
+          "entityName": "Video",
+          "schema": {
+            "$ref": "#/backend/entities/Video"
+          },
+          "description": "Stores video details, including organization ID.",
+          "params": [
+            {
+              "name": "videoId",
+              "description": "Unique identifier for the video."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/videos/{videoId}/segments/{segmentId}",
+        "definition": {
+          "entityName": "Segment",
+          "schema": {
+            "$ref": "#/backend/entities/Segment"
+          },
+          "description": "Stores segment details for a video.",
+          "params": [
+            {
+              "name": "videoId",
+              "description": "Unique identifier for the video."
+            },
+            {
+              "name": "segmentId",
+              "description": "Unique identifier for the segment."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/videos/{videoId}/segments/{segmentId}/questions/{questionId}",
+        "definition": {
+          "entityName": "Question",
+          "schema": {
+            "$ref": "#/backend/entities/Question"
+          },
+          "description": "Stores question details for a video segment.",
+          "params": [
+            {
+              "name": "videoId",
+              "description": "Unique identifier for the video."
+            },
+            {
+              "name": "segmentId",
+              "description": "Unique identifier for the segment."
+            },
+            {
+              "name": "questionId",
+              "description": "Unique identifier for the question."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/assignments/{assignmentId}",
+        "definition": {
+          "entityName": "Assignment",
+          "schema": {
+            "$ref": "#/backend/entities/Assignment"
+          },
+          "description": "Stores assignment details, including organization ID, playlist ID, and class ID.",
+          "params": [
+            {
+              "name": "assignmentId",
+              "description": "Unique identifier for the assignment."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/progress/{progressId}",
+        "definition": {
+          "entityName": "Progress",
+          "schema": {
+            "$ref": "#/backend/entities/Progress"
+          },
+          "description": "Stores student progress for an assignment.",
+          "params": [
+            {
+              "name": "progressId",
+              "description": "Unique identifier for the progress record."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/attempts/{attemptId}",
+        "definition": {
+          "entityName": "Attempt",
+          "schema": {
+            "$ref": "#/backend/entities/Attempt"
+          },
+          "description": "Stores student attempts to answer questions.",
+          "params": [
+            {
+              "name": "attemptId",
+              "description": "Unique identifier for the attempt record."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/subscription_plans/{subscriptionPlanId}",
+        "definition": {
+          "entityName": "SubscriptionPlan",
+          "schema": {
+            "$ref": "#/backend/entities/SubscriptionPlan"
+          },
+          "description": "Stores subscription plan details, including features and limits. Accessible by admins.",
+          "params": [
+            {
+              "name": "subscriptionPlanId",
+              "description": "Unique identifier for the subscription plan."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/teacher_subscriptions/{teacherSubscriptionId}",
+        "definition": {
+          "entityName": "TeacherSubscription",
+          "schema": {
+            "$ref": "#/backend/entities/TeacherSubscription"
+          },
+          "description": "Stores teacher subscriptions to specific plans, including payment information.  Includes denormalized 'userId' for authorization independence.",
+          "params": [
+            {
+              "name": "teacherSubscriptionId",
+              "description": "Unique identifier for the teacher subscription."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "This Firestore structure is designed to support iLearn's core features: assigning YouTube playlists, intelligent video pauses with AI-generated quizzes, progress tracking, and anti-skip controls. It prioritizes authorization independence through denormalization and structural segregation for simplified security rules and scalable list operations.\n\nKey structural decisions and how they support the core design principles:\n\n1.  **Authorization Independence (CRITICAL):**\n\n    *   **Denormalization:** The `orgId` is present on almost every collection. This ensures that security rules can always verify that a user has access to a resource within their organization without needing to perform expensive `get()` operations to traverse the data hierarchy. The `User` document also contains `role` information, eliminating the need to check a separate roles collection for basic authorization.\n    *   For `TeacherSubscription`, the `userId` is included, enabling direct rule-based access control for teachers.\n2.  **Clarity of Intent (Debuggability):**\n\n    *   Clear path naming (e.g., `/users/{userId}/progress/{progressId}`) makes the data relationships immediately obvious.\n    *   The structure avoids mixing different types of data in the same collection.\n3.  **DBAC (No Custom Claims):**\n\n    *   User roles (`teacher`, `student`, `admin`) are stored directly in the `/users/{userId}` document, adhering to the DBAC principle.\n4.  **QAPs (Rules are not Filters):**\n\n    *   Structural segregation is used to support secure `list` operations. For example, listing playlists is always scoped to the `orgId` contained within the playlist document.  Denormalization ensures that we never need to filter based on data from related documents, making `list` operations secure and efficient.\n5.  **Invariants:**\n\n    *   Timestamps (`createdAt`, `updatedAt`) are included in all relevant documents to track data changes and maintain data integrity.\n\nSpecific features addressed:\n\n*   **Admin Roles:** The `users` collection stores the `role` field for each user, including admins.  Security rules will check this field to grant admin-level access to specific resources (e.g., creating subscription plans).\n*   **Subscription Plans:** The `/subscription_plans` collection stores details about each plan, including features and limits.\n*   **Teacher Subscriptions:** The `/teacher_subscriptions` collection links teachers to specific subscription plans. This collection also tracks payment information and status, which is crucial for manual approval of bank transfers by the admin.\n*   **Feature Gating:**  The `enableQuizGeneration`, `enableProgressTracking`, and `enableAntiSkip` boolean fields in the `/subscription_plans` documents enable feature gating. Frontend and backend code can check these flags to enable/disable features based on the teacher's current subscription plan.\n*   **Manual Bank Transfers:** The `paymentMethod`, `transactionId`, and `paymentStatus` fields in the `/teacher_subscriptions` collection support manual bank transfers.  A separate admin UI will allow admins to view pending transactions and update the `paymentStatus` field after verification."
+  }
+}

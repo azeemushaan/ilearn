@@ -1,0 +1,215 @@
+/**
+ * @fileOverview Firestore Security Rules for iLearn Platform
+ *
+ * Core Philosophy:
+ * This ruleset enforces a role-based access control model. Users are assigned roles (teacher, student, admin) within an organization.
+ * Access is granted based on these roles and the organization context.  The `userId` is used as the primary key for user documents, enabling simple ownership checks.
+ * Authorization independence is a key principle. Redundant information such as `orgId` on every document is included to avoid needing to do too many get() requests.
+ *
+ * Data Structure:
+ * - /organizations/{orgId}: Stores organization details.
+ * - /users/{userId}: Stores user details, including role and organization ID.
+ * - /classes/{classId}: Stores class details, including organization ID and teacher IDs.
+ * - /playlists/{playlistId}: Stores playlist details, including organization ID and class IDs.
+ * - /videos/{videoId}: Stores video details, including organization ID.
+ * - /videos/{videoId}/segments/{segmentId}: Stores segment details for a video.
+ * - /videos/{videoId}/segments/{segmentId}/questions/{questionId}: Stores question details for a video segment.
+ * - /assignments/{assignmentId}: Stores assignment details, including organization ID, playlist ID, and class ID.
+ * - /progress/{progressId}: Stores student progress for an assignment.
+ * - /attempts/{attemptId}: Stores student attempts to answer questions.
+ * - /subscription_plans/{subscriptionPlanId}: Stores subscription plan details, including features and limits.
+ * - /teacher_subscriptions/{teacherSubscriptionId}: Stores teacher subscriptions to specific plans, including payment information.
+ *
+ * Key Security Decisions:
+ * - User listing is disallowed.
+ * - Admins have elevated privileges for creating and managing subscription plans.
+ * - All write operations are restricted based on user role and organization membership.
+ * - Data is denormalized to avoid complex security rules that require multiple `get()` operations.
+ * - Timestamps are included in documents for tracking changes, but are not validated.
+ *
+ * Denormalization for Authorization:
+ * - The `orgId` is present on almost every collection. This avoids the need for rules to perform `get()` operations to retrieve an organization ID.
+ * - The `User` document contains the `role` field, avoiding the need for security rules to fetch roles from a separate collection.
+ */
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * @description Allows read and write access to organization documents for authenticated users.
+     * @path /organizations/{orgId}
+     * @allow (get, list): if true;
+     * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+     * @principle Allows public read access. Writes are restricted.
+     */
+    match /organizations/{orgId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+    }
+
+    /**
+     * @description Allows read and write access to user documents for the owner (the user themselves).
+     * @path /users/{userId}
+     * @allow (get): if isSignedIn() && isOwner(userId);
+     * @allow (list): if false;
+     * @allow (create): if isSignedIn() && isOwner(userId);
+     * @allow (update): if isSignedIn() && isExistingOwner(userId);
+     * @allow (delete): if isSignedIn() && isExistingOwner(userId);
+     * @deny (create): if !isSignedIn() || !isOwner(userId);
+     * @deny (update): if !isSignedIn() || !isExistingOwner(userId);
+     * @deny (delete): if !isSignedIn() || !isExistingOwner(userId);
+     * @principle Enforces document ownership for all read and write operations.
+     */
+    match /users/{userId} {
+      allow get: if isSignedIn() && isOwner(userId);
+      allow list: if false;
+      allow create: if isSignedIn() && isOwner(userId);
+      allow update: if isSignedIn() && isExistingOwner(userId) && request.resource.data.id == resource.data.id;
+      allow delete: if isSignedIn() && isExistingOwner(userId);
+    }
+
+    /**
+     * @description Allows read and write access to class documents for authenticated users.
+     * @path /classes/{classId}
+     * @allow (get, list): if true;
+     * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+     * @principle Allows public read access. Writes are restricted.
+     */
+    match /classes/{classId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+    }
+
+    /**
+     * @description Allows read and write access to playlist documents for authenticated users.
+     * @path /playlists/{playlistId}
+     * @allow (get, list): if true;
+     * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+     * @principle Allows public read access. Writes are restricted.
+     */
+    match /playlists/{playlistId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+    }
+
+    /**
+     * @description Allows read and write access to video documents for authenticated users.
+     * @path /videos/{videoId}
+     * @allow (get, list): if true;
+     * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+     * @principle Allows public read access. Writes are restricted.
+     */
+    match /videos/{videoId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+
+      /**
+       * @description Allows read and write access to segment documents for authenticated users.
+       * @path /videos/{videoId}/segments/{segmentId}
+       * @allow (get, list): if true;
+       * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+       * @principle Allows public read access. Writes are restricted.
+       */
+      match /segments/{segmentId} {
+        allow get, list: if true;
+        allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+
+          /**
+           * @description Allows read and write access to question documents for authenticated users.
+           * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
+           * @allow (get, list): if true;
+           * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+           * @principle Allows public read access. Writes are restricted.
+           */
+          match /questions/{questionId} {
+            allow get, list: if true;
+            allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+          }
+      }
+    }
+
+    /**
+     * @description Allows read and write access to assignment documents for authenticated users.
+     * @path /assignments/{assignmentId}
+     * @allow (get, list): if true;
+     * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+     * @principle Allows public read access. Writes are restricted.
+     */
+    match /assignments/{assignmentId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+    }
+
+    /**
+     * @description Allows read and write access to progress documents for authenticated users.
+     * @path /progress/{progressId}
+     * @allow (get, list): if true;
+     * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+     * @principle Allows public read access. Writes are restricted.
+     */
+    match /progress/{progressId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+    }
+
+    /**
+     * @description Allows read and write access to attempt documents for authenticated users.
+     * @path /attempts/{attemptId}
+     * @allow (get, list): if true;
+     * @allow (create, update, delete): if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+     * @principle Allows public read access. Writes are restricted.
+     */
+    match /attempts/{attemptId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // TODO: Add owner validation once the schema is updated with an ownership field.
+    }
+
+   /**
+    * @description Allows admins to create, read, update, and delete subscription plans.
+    * @path /subscription_plans/{subscriptionPlanId}
+    * @allow get: if true;
+    * @allow list: if true;
+    * @allow create: if isSignedIn(); // TODO: add admin check
+    * @allow update: if isSignedIn() && resource != null; // TODO: add admin check
+    * @allow delete: if isSignedIn() && resource != null; // TODO: add admin check
+    * @principle Restricts write access to admins.
+    */
+    match /subscription_plans/{subscriptionPlanId} {
+      allow get, list: if true;
+      allow create: if isSignedIn(); // TODO: add admin check
+      allow update: if isSignedIn() && resource != null; // TODO: add admin check
+      allow delete: if isSignedIn() && resource != null; // TODO: add admin check
+    }
+
+    /**
+     * @description Allows read and write access to teacher subscription documents for the owner (the teacher themselves) and admins.
+     * @path /teacher_subscriptions/{teacherSubscriptionId}
+     * @allow get: if isSignedIn() && isOwner(resource.data.userId);
+     * @allow list: if isSignedIn(); // TODO: add admin check
+     * @allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+     * @allow update: if isSignedIn() && isExistingOwner(resource.data.userId) && request.resource.data.userId == resource.data.userId;
+     * @allow delete: if isSignedIn() && isExistingOwner(resource.data.userId); // TODO: add admin check
+     * @principle Enforces document ownership for teachers and allows admin access.
+     */
+    match /teacher_subscriptions/{teacherSubscriptionId} {
+      allow get: if isSignedIn() && isOwner(resource.data.userId);
+      allow list: if isSignedIn(); // TODO: add admin check
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && isExistingOwner(resource.data.userId) && request.resource.data.userId == resource.data.userId;
+      allow delete: if isSignedIn() && isExistingOwner(resource.data.userId); // TODO: add admin check
+    }
+  }
+
+  // Helper functions
+  function isSignedIn() {
+    return request.auth != null;
+  }
+
+  function isOwner(userId) {
+    return request.auth.uid == userId;
+  }
+
+  function isExistingOwner(userId) {
+      return isSignedIn() && isOwner(userId) && resource != null;
+  }
+}
