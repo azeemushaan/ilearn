@@ -28,6 +28,14 @@ export default function AdminLoginPage() {
     const tokenResult = await user.getIdTokenResult();
     const claims = tokenResult.claims;
 
+    // Debugging Toast: Display the claims
+    toast({
+      title: "User Claims Verified",
+      description: <pre className="mt-2 w-[340px] rounded-md bg-slate-950 p-4"><code className="text-white">{JSON.stringify(claims, null, 2)}</code></pre>,
+      duration: 10000, // Keep toast open longer for debugging
+    });
+
+
     if (claims.role === 'admin') {
       router.push("/admin/dashboard");
     } else {
