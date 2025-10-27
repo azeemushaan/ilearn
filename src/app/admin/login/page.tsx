@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Logo from "@/components/logo";
 import { useAuth } from "@/firebase";
-import { signInWithEmailAndPassword, User } from "firebase/auth";
+import { signInWithEmailAndPassword } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -16,28 +16,26 @@ export default function AdminLoginPage() {
   const auth = useAuth();
   const router = useRouter();
   const { toast } = useToast();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState("ilearn@er21.org");
   const [password, setPassword] = useState("");
-
-  const handleLoginSuccess = async (user: User) => {
-    // Admins are always redirected to the admin dashboard
-    router.push("/admin/dashboard");
-  };
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth) return;
+    setIsLoading(true);
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      // For this page, we assume the user is an admin.
-      // The /admin/layout.tsx will verify their role from Firestore.
-      await handleLoginSuccess(userCredential.user);
+      await signInWithEmailAndPassword(auth, email, password);
+      // The layout protecting /admin/dashboard will handle the redirect
+      // after auth state is confirmed. We just need to push them there.
+      router.push("/admin/dashboard");
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Login failed",
         description: error.message,
       });
+      setIsLoading(false);
     }
   };
 
@@ -63,8 +61,8 @@ export default function AdminLoginPage() {
               <Label htmlFor="password">Password</Label>
               <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
-            <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-              Login
+            <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={isLoading}>
+              {isLoading ? "Logging in..." : "Login"}
             </Button>
           </form>
         </CardContent>
