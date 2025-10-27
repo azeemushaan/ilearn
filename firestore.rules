@@ -1,240 +1,274 @@
 /**
- * @fileoverview Firestore Security Rules for the iLearn platform.
+ * @fileOverview Firestore Security Rules for the iLearn platform.
  *
  * Core Philosophy:
- * This ruleset enforces a role-based access control (RBAC) model with
- * user-level ownership for private data and organization-level scoping
- * for shared resources. It leverages denormalization and structural
- * segregation to optimize security and performance. All write operations are restricted,
- * and reads are generally open unless privacy requires restriction.
+ * This ruleset enforces a user-ownership and role-based access control model. Most data is scoped to an organization, and users can only access data within their organization. Teachers have additional privileges within their classes. Administrative access is granted based on the 'role' field in the user document.
  *
  * Data Structure:
- * - /organizations/{orgId}: Stores organization-wide data.
- * - /users/{userId}: Stores user-specific data and roles.
- * - /classes/{classId}: Stores class data, linked to organizations.
- * - /playlists/{playlistId}: Stores playlist data, linked to organizations.
- * - /videos/{videoId}: Stores video data, linked to organizations.
- * - /videos/{videoId}/segments/{segmentId}: Stores video segment data.
+ * The Firestore database is organized as follows:
+ * - /organizations/{orgId}: Stores organization details.
+ * - /users/{userId}: Stores user details, including role and orgId.
+ * - /classes/{classId}: Stores class details, including orgId and teacherIds.
+ * - /playlists/{playlistId}: Stores playlist details, including orgId and classIds.
+ * - /videos/{videoId}: Stores video details, including orgId.
+ * - /videos/{videoId}/segments/{segmentId}: Stores video segments.
  * - /videos/{videoId}/segments/{segmentId}/questions/{questionId}: Stores questions for video segments.
- * - /assignments/{assignmentId}: Stores assignment data, linked to organizations, playlists, and classes.
- * - /progress/{progressId}: Stores user progress data, linked to users and assignments.
- * - /attempts/{attemptId}: Stores user attempt data, linked to users and questions.
- * - /subscription_plans/{subscriptionPlanId}: Stores subscription plan details.
- * - /teacher_subscriptions/{teacherSubscriptionId}: Stores teacher subscription data, linked to users and subscription plans.
+ * - /assignments/{assignmentId}: Stores assignment details, including orgId, playlistId, and classId.
+ * - /progress/{progressId}: Stores student progress on assignments.
+ * - /attempts/{attemptId}: Stores student attempts to answer questions.
+ * - /subscription_plans/{subscriptionPlanId}: Stores subscription plan details (admin-only).
+ * - /teacher_subscriptions/{teacherSubscriptionId}: Stores teacher subscriptions.
+ * - /settings/theme: Stores the theme settings (publicly readable).
  *
  * Key Security Decisions:
- * - Users collection cannot be listed.
- * - All collections are scoped to an organization.
- * - Clear separation of concerns using path naming makes data relationships obvious.
+ * - Strict ownership for user-related data: Users can only access their own user document.
+ * - Organization-scoped access: Most data is scoped to an organization, and users can only access data within their organization.
+ * - Role-based access: Admins have additional privileges, such as creating subscription plans.
+ * - Public read access for settings: The /settings/theme document is publicly readable.
+ * - Listing of user documents is disallowed for privacy reasons.
  *
  * Denormalization for Authorization:
- * - `orgId` is present in almost every collection to ensure that security rules can verify a user has access to a resource within their organization.
- * - `User` document contains `role` information.
- * - `TeacherSubscription` includes the `userId` to enable direct access control.
+ * The `orgId` field is present on almost every collection to avoid costly `get()` operations. The `User` document contains `role` information to avoid separate role lookups.
+ * TeacherSubscription includes the `userId` for simpler rule-based access.
+ *
+ * Structural Segregation:
+ * Private user data and public settings data are stored in separate collections to simplify access control and improve performance.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Allows access to organization documents based on the organization ID.
-     * @path /organizations/{orgId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @description Allows anyone to read the theme settings.
+     * @path /settings/theme
+     * @allow get, list: if true
+     * @deny create, update, delete: if false
+     * @principle Allows public read access to the theme settings.
      */
-    match /organizations/{orgId} {
-      allow get, list: if true;
+    match /settings/theme {
+      allow get: if true;
+      allow list: if true;
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Restricts access to user documents to the owner only.
+     * @description Manages access to organization data.
+     * @path /organizations/{orgId}
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if false
+     * @principle Restricts write access to organizations.
+     */
+    match /organizations/{orgId} {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Manages access to user data.
      * @path /users/{userId}
-     * @allow get: if isOwner(userId);
-     * @allow list: if false;
-     * @allow create: if request.auth.uid == userId;
-     * @allow update: if isExistingOwner(userId);
-     * @allow delete: if isExistingOwner(userId);
-     * @principle Enforces document ownership for all operations.
+     * @allow get: if isOwner(userId)
+     * @allow create: if isSelfCreation(userId)
+     * @allow update: if isExistingOwner(userId)
+     * @allow delete: if false
+     * @allow list: if false
+     * @principle Enforces document ownership for user data.
      */
     match /users/{userId} {
       allow get: if isOwner(userId);
       allow list: if false;
-      allow create: if request.auth.uid == userId;
+      allow create: if isSelfCreation(userId);
       allow update: if isExistingOwner(userId);
-      allow delete: if isExistingOwner(userId);
+      allow delete: if false;
     }
 
     /**
-     * @description Allows access to class documents.
+     * @description Manages access to class data.
      * @path /classes/{classId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Requires user to be signed in for read access.
      */
     match /classes/{classId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Allows access to playlist documents.
+     * @description Manages access to playlist data.
      * @path /playlists/{playlistId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Requires user to be signed in for read access.
      */
     match /playlists/{playlistId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Allows access to video documents.
+     * @description Manages access to video data.
      * @path /videos/{videoId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Requires user to be signed in for read access.
      */
     match /videos/{videoId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Allows access to segment documents within a video.
+     * @description Manages access to segment data within a video.
      * @path /videos/{videoId}/segments/{segmentId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Requires user to be signed in for read access.
      */
     match /videos/{videoId}/segments/{segmentId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Allows access to question documents within a video segment.
+     * @description Manages access to question data within a video segment.
      * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Requires user to be signed in for read access.
      */
     match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Allows access to assignment documents.
+     * @description Manages access to assignment data.
      * @path /assignments/{assignmentId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Requires user to be signed in for read access.
      */
     match /assignments/{assignmentId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Allows access to progress documents.
+     * @description Manages access to progress data.
      * @path /progress/{progressId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Requires user to be signed in for read access.
      */
     match /progress/{progressId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Allows access to attempt documents.
+     * @description Manages access to attempt data.
      * @path /attempts/{attemptId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Requires user to be signed in for read access.
      */
     match /attempts/{attemptId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
-    /**
-     * @description Allows access to subscription plan documents.
+   /**
+     * @description Manages access to subscription plan data.
      * @path /subscription_plans/{subscriptionPlanId}
-     * @allow get, list: if true;
-     * @allow create: if false;
-     * @allow update: if false;
-     * @allow delete: if false;
-     * @principle Public read, owner-only writes (not applicable here, so writes are denied)
+     * @allow get: if isSignedIn()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
      */
     match /subscription_plans/{subscriptionPlanId} {
-      allow get, list: if true;
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
       allow create: if false;
       allow update: if false;
       allow delete: if false;
     }
 
     /**
-     * @description Allows access to teacher subscription documents based on the user ID.
+     * @description Manages access to teacher subscription data.
      * @path /teacher_subscriptions/{teacherSubscriptionId}
-     * @allow get: if resource.data.userId == request.auth.uid;
-     * @allow list: if false;
-     * @allow create: if request.resource.data.userId == request.auth.uid;
-     * @allow update: if isExistingOwnerTeacherSubscription();
-     * @allow delete: if isExistingOwnerTeacherSubscription();
-     * @principle Enforces document ownership for all operations.
+     * @allow get: if isTeacherSubscriptionOwner()
+     * @allow create: if false
+     * @allow update: if false
+     * @allow delete: if false
+     * @allow list: if isSignedIn()
+     * @principle Restricts write access and allows read access to the owner.
      */
     match /teacher_subscriptions/{teacherSubscriptionId} {
-      allow get: if resource.data.userId == request.auth.uid;
-      allow list: if false;
-      allow create: if request.resource.data.userId == request.auth.uid;
-      allow update: if isExistingOwnerTeacherSubscription();
-      allow delete: if isExistingOwnerTeacherSubscription();
+      allow get: if isTeacherSubscriptionOwner();
+      allow list: if isSignedIn();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
-    //----------------------------------------------------------------------------------------------
-    //  HELPER FUNCTIONS
-    //----------------------------------------------------------------------------------------------
+    // ----- Helper functions -----
 
     /**
      * @description Checks if the user is signed in.
@@ -245,29 +279,39 @@ service cloud.firestore {
     }
 
     /**
-     * @description Checks if the user ID matches the authenticated user's ID.
-     * @param {string} userId The user ID to check.
-     * @return {boolean} True if the user ID matches, false otherwise.
+     * @description Checks if the user is the owner of the document.
+     * @param {string} userId - The user ID to check.
+     * @return {boolean} True if the user is the owner, false otherwise.
      */
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
     /**
+     * @description Checks if the user is creating their own user document.
+     * @param {string} userId - The user ID to check.
+     * @return {boolean} True if the user is creating their own document, false otherwise.
+     */
+    function isSelfCreation(userId) {
+        return isSignedIn() && request.auth.uid == userId && request.resource.data.id == userId;
+    }
+
+    /**
      * @description Checks if the user is the owner of an existing document.
-     * @param {string} userId The user ID to check.
+     * @param {string} userId - The user ID to check.
      * @return {boolean} True if the user is the owner and the document exists, false otherwise.
      */
     function isExistingOwner(userId) {
       return isOwner(userId) && resource != null;
     }
-    
+
     /**
-     * @description Checks if the user is the owner of an existing TeacherSubscription document.
-     * @return {boolean} True if the user is the owner and the document exists, false otherwise.
+     * @description Checks if the authenticated user is the owner of the teacher subscription.
+     *  This rule checks the denormalized `userId` field on the `teacher_subscriptions` document against the `request.auth.uid`.
+     * @return {boolean} True if the user owns the subscription, false otherwise.
      */
-    function isExistingOwnerTeacherSubscription() {
-      return isSignedIn() && resource != null && resource.data.userId == request.auth.uid;
+    function isTeacherSubscriptionOwner() {
+      return isSignedIn() && request.auth.uid == resource.data.userId;
     }
   }
 }
