@@ -81,7 +81,7 @@ export default function DashboardLayout({
         <SidebarContent>
           <SidebarMenu>
             <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={router.pathname === '/dashboard'} tooltip="Dashboard">
+                <SidebarMenuButton asChild>
                   <Link href="/dashboard">
                     <Home />
                     <span>Dashboard</span>
@@ -91,7 +91,7 @@ export default function DashboardLayout({
             {userRole === 'admin' && (
               <>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Subscriptions">
+                  <SidebarMenuButton asChild>
                     <Link href="/dashboard/subscriptions">
                       <Package />
                       <span>Subscriptions</span>
@@ -99,7 +99,7 @@ export default function DashboardLayout({
                   </SidebarMenuButton>
                 </SidebarMenuItem>
                 <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Payments">
+                  <SidebarMenuButton asChild>
                     <Link href="/dashboard/payments">
                       <CreditCard />
                       <span>Payments</span>
@@ -109,7 +109,7 @@ export default function DashboardLayout({
               </>
             )}
             <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Playlists">
+              <SidebarMenuButton asChild>
                 <Link href="/dashboard/playlists">
                   <PlaySquare />
                   <span>Playlists</span>
@@ -117,7 +117,7 @@ export default function DashboardLayout({
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Classes">
+              <SidebarMenuButton asChild>
                 <Link href="/dashboard/classes">
                   <Users />
                   <span>Classes</span>
@@ -125,7 +125,7 @@ export default function DashboardLayout({
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Analytics">
+              <SidebarMenuButton asChild>
                 <Link href="/dashboard/analytics">
                   <BarChart3 />
                   <span>Analytics</span>
@@ -137,15 +137,15 @@ export default function DashboardLayout({
         <SidebarFooter>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Settings">
-                <Link href="#">
+              <SidebarMenuButton asChild>
+                <Link href="/dashboard/settings">
                   <Settings />
                   <span>Settings</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="Support">
+              <SidebarMenuButton asChild>
                 <Link href="#">
                   <HelpCircle />
                   <span>Support</span>
