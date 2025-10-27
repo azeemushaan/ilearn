@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Logo from "@/components/logo";
 import { useAuth, useFirestore } from "@/firebase";
-import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword } from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -26,17 +26,25 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleLoginSuccess = async (user: any) => {
+  const handleLoginSuccess = async (user: User) => {
+    if (!firestore) return;
     const userDocRef = doc(firestore, "users", user.uid);
-    const userDoc = await getDoc(userDocRef);
-    if (userDoc.exists() && userDoc.data().role === 'admin') {
-      router.push("/admin/dashboard");
-    } else {
-      router.push("/dashboard");
+    try {
+        const userDoc = await getDoc(userDocRef);
+        if (userDoc.exists() && userDoc.data().role === 'admin') {
+            router.push("/admin/dashboard");
+        } else {
+            router.push("/dashboard");
+        }
+    } catch (error) {
+        console.error("Error fetching user document:", error);
+        // Default to teacher dashboard on error
+        router.push("/dashboard");
     }
   };
 
   const handleGoogleLogin = async () => {
+    if (!auth) return;
     const provider = new GoogleAuthProvider();
     try {
       const userCredential = await signInWithPopup(auth, provider);
@@ -52,6 +60,7 @@ export default function LoginPage() {
   
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!auth) return;
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       await handleLoginSuccess(userCredential.user);

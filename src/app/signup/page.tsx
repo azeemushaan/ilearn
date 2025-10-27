@@ -29,12 +29,16 @@ export default function SignupPage() {
   const [password, setPassword] = useState('');
 
   const handleLoginSuccess = async (user: User) => {
+    if (!firestore) return;
     const userDocRef = doc(firestore, "users", user.uid);
-    const userDoc = await getDoc(userDocRef);
-    if (userDoc.exists() && userDoc.data().role === 'admin') {
-      router.push("/admin/dashboard");
+    // The user document might not be available immediately after creation.
+    // We check the role from the email, which is reliable during signup.
+    const role = user.email?.toLowerCase() === 'ilearn@er21.org' ? 'admin' : 'teacher';
+    
+    if (role === 'admin') {
+        router.push("/admin/dashboard");
     } else {
-      router.push("/dashboard");
+        router.push("/dashboard");
     }
   };
 
@@ -51,13 +55,15 @@ export default function SignupPage() {
       updatedAt: serverTimestamp(),
     };
     
-    if (role === 'admin') {
-        userData.firstName = 'Admin';
-        userData.lastName = '';
-    } else {
+    if (name) {
         const nameParts = name.split(' ');
         userData.firstName = nameParts[0] || '';
         userData.lastName = nameParts.slice(1).join(' ') || '';
+    }
+    
+    if (role === 'admin') {
+        userData.firstName = 'Admin';
+        userData.lastName = '';
     }
 
     await setDoc(userRef, userData, { merge: true });
