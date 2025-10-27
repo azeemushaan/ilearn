@@ -1,3 +1,4 @@
+
 'use client';
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -5,12 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Logo from "@/components/logo";
-import { useAuth, useFirestore } from "@/firebase";
+import { useAuth } from "@/firebase";
 import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { doc, getDoc } from "firebase/firestore";
 
 const GoogleIcon = () => (
   <svg className="mr-2 h-4 w-4" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
@@ -20,25 +20,22 @@ const GoogleIcon = () => (
 
 export default function LoginPage() {
   const auth = useAuth();
-  const firestore = useFirestore();
   const router = useRouter();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const handleLoginSuccess = async (user: User) => {
-    if (!firestore) return;
-    const userDocRef = doc(firestore, "users", user.uid);
-    try {
-        const userDoc = await getDoc(userDocRef);
-        if (userDoc.exists() && userDoc.data().role === 'admin') {
-            router.push("/admin/dashboard");
-        } else {
-            router.push("/dashboard");
-        }
-    } catch (error) {
-        console.error("Error fetching user document:", error);
-        // Default to teacher dashboard on error
+    if (!auth) return;
+    
+    // Force a token refresh to get the latest custom claims
+    await user.getIdToken(true);
+    const tokenResult = await user.getIdTokenResult();
+    const claims = tokenResult.claims;
+
+    if (claims.role === 'admin') {
+        router.push("/admin/dashboard");
+    } else {
         router.push("/dashboard");
     }
   };

@@ -11,7 +11,8 @@ import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, Us
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, getDoc, serverTimestamp, addDoc, collection } from "firebase/firestore";
+import { setUserClaims } from "@/ai/flows/set-user-claims";
 
 const GoogleIcon = () => (
     <svg className="mr-2 h-4 w-4" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
@@ -30,41 +31,76 @@ export default function SignupPage() {
   const [password, setPassword] = useState('');
 
   const handleLoginSuccess = async (user: User) => {
-    if (!firestore) return;
-    const role = user.email?.toLowerCase() === 'ilearn@er21.org' ? 'admin' : 'teacher';
+    if (!firestore || !auth) return;
     
-    if (role === 'admin') {
+    // Force a token refresh to get the latest custom claims
+    await user.getIdToken(true);
+    const tokenResult = await user.getIdTokenResult();
+    const claims = tokenResult.claims;
+
+    if (claims.role === 'admin') {
         router.push("/admin/dashboard");
     } else {
         router.push("/dashboard");
     }
   };
 
-  const createOrUpdateUserDocument = async (user: User, name: string) => {
-    if (!firestore) return;
+  const createOrUpdateUser = async (user: User, name: string) => {
+    if (!firestore) throw new Error("Firestore not available");
+    
+    const isSpecialAdmin = user.email?.toLowerCase() === 'ilearn@er21.org';
+    const role = isSpecialAdmin ? 'admin' : 'teacher';
+
+    let coachId: string;
+    let coachRef;
+
+    // The special admin is their own coach
+    if (isSpecialAdmin) {
+        coachId = user.uid;
+        coachRef = doc(firestore, "coaches", coachId);
+        
+        await setDoc(coachRef, {
+            displayName: name || user.email,
+            email: user.email,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        }, { merge: true });
+    } else {
+        // For a regular teacher, create a new coach document and use its ID
+        const newCoachRef = await addDoc(collection(firestore, "coaches"), {
+             displayName: name || user.email,
+             email: user.email,
+             createdAt: serverTimestamp(),
+             updatedAt: serverTimestamp(),
+        });
+        coachId = newCoachRef.id;
+    }
+
+    // Set user document in Firestore
     const userRef = doc(firestore, "users", user.uid);
-    const role = user.email?.toLowerCase() === 'ilearn@er21.org' ? 'admin' : 'teacher';
+    const nameParts = name.split(' ');
+    await setDoc(userRef, {
+        coachId: coachId,
+        role: role,
+        profile: {
+            name: name,
+            email: user.email,
+            photoUrl: user.photoURL || ''
+        },
+        status: 'active',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+    }, { merge: true });
 
-    let userData: any = {
-      id: user.uid,
-      email: user.email,
-      role: role,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-    
-    if (name) {
-        const nameParts = name.split(' ');
-        userData.firstName = nameParts[0] || '';
-        userData.lastName = nameParts.slice(1).join(' ') || '';
-    }
-    
-    if (role === 'admin') {
-        userData.firstName = 'Admin';
-        userData.lastName = '';
-    }
+    // Set custom claims using the server-side flow
+    await setUserClaims({
+        uid: user.uid,
+        claims: {
+            role: role,
+            coachId: coachId
+        }
+    });
 
-    await setDoc(userRef, userData, { merge: true });
   }
 
   const handleGoogleSignup = async () => {
@@ -74,7 +110,7 @@ export default function SignupPage() {
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
       
-      await createOrUpdateUserDocument(user, user.displayName || '');
+      await createOrUpdateUser(user, user.displayName || '');
 
       await handleLoginSuccess(user);
     } catch (error: any) {
@@ -93,7 +129,7 @@ export default function SignupPage() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
-      await createOrUpdateUserDocument(user, name);
+      await createOrUpdateUser(user, name);
 
       await handleLoginSuccess(user);
     } catch (error: any) {
