@@ -1,233 +1,245 @@
 /**
- * @fileOverview Firestore Security Rules for the iLearn platform.
+ * @file Firebase Security Rules for iLearn Platform
  *
- * Core Philosophy:
- * This ruleset enforces a role-based access control system within a multi-tenant data model, with strong emphasis on organization-level data isolation. The security model prioritizes simplicity and performance by denormalizing key authorization data (e.g., `orgId`, `userId`, `role`) directly within documents.
+ * @Core Philosophy:
+ * This ruleset enforces a user-ownership model for user-specific data and an organization-based access control model for shared resources.
+ * Administrative privileges are granted based on the 'role' field in the user document.
  *
- * Data Structure:
- * The Firestore database is structured hierarchically with top-level collections such as `organizations`, `users`, `classes`, `playlists`, `videos`, `assignments`, `progress`, `attempts`, `subscription_plans`, and `teacher_subscriptions`. Most data is scoped to an `orgId`, ensuring that users can only access data within their organization. Subcollections (e.g., `segments`, `questions`) are used to represent nested relationships.
+ * @Data Structure:
+ * The database is organized into top-level collections for organizations, users, classes, playlists, videos, assignments, progress, attempts, and subscription plans.
+ * Data is generally namespaced under an organization ID to ensure isolation and access control.
  *
- * Key Security Decisions:
- * - **Organization-Based Access:** Most collections include `orgId`, enabling rules to scope access to a specific organization.
- * - **Role-Based Access:** User roles (`teacher`, `student`, `admin`) are stored in the `users` collection and used to grant different levels of access.
- * - **Ownership and Shared Access:** The `teacherIds` array in the `classes` collection enables shared write access for teachers of a class. The `userId` field is denormalized into `TeacherSubscription` documents, enabling rules based on the user's auth UID.
- * - **No User Listing:** Listing all users is generally disallowed to prevent information leakage.
- * - **Settings Collection:** The `settings` collection is implicitly public, since the error log suggests access to `/settings/theme` fails due to insufficient permissions.
- *
- * Denormalization for Authorization:
- * - `orgId` is included in most documents to avoid costly `get()` operations for authorization checks.
- * - `userId` is included in `TeacherSubscription` documents for direct rule-based access control.
- *
- * Structural Segregation:
- * - There is no explicit use of private vs. public collections (e.g., drafts vs. published), but the organization-based access effectively isolates data between organizations.
+ * @Key Security Decisions:
+ * - Users can only read/write their own user document.
+ * - Only authenticated users can access the platform.
+ * - Administrative roles are required to manage subscription plans.
+ * - Data is denormalized (orgId, userId) to avoid complex queries in security rules.
+ * - Listing user documents is disallowed.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Allows anyone to read settings, but restricts writing.
-     * @path /settings/{document}
-     * @allow (get, list) Allow public access to read settings.
-     * @deny (create, update, delete) Deny all write access to settings.
-     * @principle Allows public read access for settings, while preventing any unauthorized modifications.
+     * @description Checks if the request is authenticated.
      */
-    match /settings/{document} {
-      allow get, list: if true;
-      allow create, update, delete: if false;
-    }
-
-    /**
-     * @description Manages access to organization data.
-     * @path /organizations/{orgId}
-     * @allow (get, list) Allow anyone to read organization data.
-     * @allow (create) Allow anyone to create organization data.
-     * @allow (update, delete) Allow only the organization's administrator to update or delete organization data.
-     * @deny (update, delete) Deny update and delete from non-admin users.
-     * @principle Enforces owner-only write access for Organizations.
-     */
-    match /organizations/{orgId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to user data.
-     * @path /users/{userId}
-     * @allow (create) Allow a user to create their own profile.
-     * @allow (get) Allow a user to read their own profile.
-     * @deny (list) Prevent listing of all users.
-     * @deny (update, delete) Prevent users from updating or deleting other user profiles.
-     * @principle Enforces user-ownership for user profiles.
-     */
-    match /users/{userId} {
-      allow create: if isOwner(userId);
-      allow get: if isOwner(userId);
-      allow list: if false;
-      allow update, delete: if false; // TODO: Implement admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to class data.
-     * @path /classes/{classId}
-     * @allow (get, list) Allow anyone to read class data.
-     * @allow (create) Allow anyone to create class data.
-     * @allow (update, delete) Allow only teachers of the class to update or delete class data.
-     * @deny (update, delete) Deny update and delete from non-teachers.
-     * @principle Enforces shared-access (closed collaborators) for Classes among teachers.
-     */
-    match /classes/{classId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement shared access check based on teacherIds
-    }
-
-    /**
-     * @description Manages access to playlist data.
-     * @path /playlists/{playlistId}
-     * @allow (get, list) Allow anyone to read playlist data.
-     * @allow (create) Allow anyone to create playlist data.
-     * @allow (update, delete) Allow only the playlist creator or organization admin to update or delete playlist data.
-     * @deny (update, delete) Deny update and delete from non-creators/admins.
-     * @principle Enforces owner-only write access for Playlists.
-     */
-    match /playlists/{playlistId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement creator and admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to video data.
-     * @path /videos/{videoId}
-     * @allow (get, list) Allow anyone to read video data.
-     * @allow (create) Allow anyone to create video data.
-     * @allow (update, delete) Allow only the video creator or organization admin to update or delete video data.
-     * @deny (update, delete) Deny update and delete from non-creators/admins.
-     * @principle Enforces owner-only write access for Videos.
-     */
-    match /videos/{videoId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement creator and admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to segment data within a video.
-     * @path /videos/{videoId}/segments/{segmentId}
-     * @allow (get, list) Allow anyone to read segment data.
-     * @allow (create) Allow anyone to create segment data.
-     * @allow (update, delete) Allow only the video creator or organization admin to update or delete segment data.
-     * @deny (update, delete) Deny update and delete from non-creators/admins.
-     * @principle Enforces owner-only write access for Segments, inheriting permissions from the parent Video.
-     */
-    match /videos/{videoId}/segments/{segmentId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement creator and admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to question data within a video segment.
-     * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
-     * @allow (get, list) Allow anyone to read question data.
-     * @allow (create) Allow anyone to create question data.
-     * @allow (update, delete) Allow only the video creator or organization admin to update or delete question data.
-     * @deny (update, delete) Deny update and delete from non-creators/admins.
-     * @principle Enforces owner-only write access for Questions, inheriting permissions from the parent Video.
-     */
-    match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement creator and admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to assignment data.
-     * @path /assignments/{assignmentId}
-     * @allow (get, list) Allow anyone to read assignment data.
-     * @allow (create) Allow anyone to create assignment data.
-     * @allow (update, delete) Allow only the assignment creator or organization admin to update or delete assignment data.
-     * @deny (update, delete) Deny update and delete from non-creators/admins.
-     * @principle Enforces owner-only write access for Assignments.
-     */
-    match /assignments/{assignmentId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement creator and admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to progress data.
-     * @path /progress/{progressId}
-     * @allow (get) Allow anyone to read progress data.
-     * @allow (list) Allow listing of progress data.
-     * @allow (create) Allow anyone to create progress data.
-     * @allow (update, delete) Allow only the student or organization admin to update or delete their progress data.
-     * @deny (update, delete) Deny update and delete from non-student/admins.
-     * @principle Enforces owner-only write access for Progress.
-     */
-    match /progress/{progressId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement student-ownership and admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to attempt data.
-     * @path /attempts/{attemptId}
-     * @allow (get) Allow anyone to read attempt data.
-     * @allow (list) Allow listing of attempt data.
-     * @allow (create) Allow anyone to create attempt data.
-     * @allow (update, delete) Allow only the student or organization admin to update or delete their attempt data.
-     * @deny (update, delete) Deny update and delete from non-student/admins.
-     * @principle Enforces owner-only write access for Attempts.
-     */
-    match /attempts/{attemptId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement student-ownership and admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to subscription plan data.
-     * @path /subscription_plans/{subscriptionPlanId}
-     * @allow (get, list) Allow anyone to read subscription plan data.
-     * @allow (create) Allow anyone to create subscription plan data.
-     * @allow (update, delete) Allow only the organization admin to update or delete subscription plan data.
-     * @deny (update, delete) Deny update and delete from non-admins.
-     * @principle Enforces admin-only write access for SubscriptionPlans.
-     */
-    match /subscription_plans/{subscriptionPlanId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement admin role check for updates and deletes
-    }
-
-    /**
-     * @description Manages access to teacher subscription data.
-     * @path /teacher_subscriptions/{teacherSubscriptionId}
-     * @allow (get) Allow anyone to read teacher subscription data.
-     * @allow (list) Allow listing of teacher subscriptions data.
-     * @allow (create) Allow anyone to create teacher subscription data.
-     * @allow (update, delete) Allow only the teacher or organization admin to update or delete their subscription data.
-     * @deny (update, delete) Deny update and delete from non-teacher/admins.
-     * @principle Enforces user-ownership and admin-only write access for TeacherSubscriptions.
-     */
-    match /teacher_subscriptions/{teacherSubscriptionId} {
-      allow get, list: if true;
-      allow create: if true;
-      allow update, delete: if false; // TODO: Implement user-ownership and admin role check for updates and deletes
-    }
-
-    // --- Helper functions ---
     function isSignedIn() {
       return request.auth != null;
     }
 
+    /**
+     * @description Checks if the authenticated user's ID matches the provided user ID.
+     */
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return request.auth.uid == userId;
+    }
+
+    /**
+     * @description Checks if the authenticated user's ID matches the provided user ID and resource exists.
+     */
+    function isExistingOwner(userId) {
+        return isOwner(userId) && resource != null;
+    }
+
+    /**
+     * @description Checks if the authenticated user has the 'admin' role.
+     */
+    function isAdmin() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    /**
+     * @description Checks if the authenticated user is a teacher and the organization ID matches.
+     */
+    function isTeacherForOrg(orgId) {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'teacher'
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgId == orgId;
+    }
+    
+    /**
+     * @description Checks if the authenticated user is a student and the organization ID matches.
+     */
+    function isStudentForOrg(orgId) {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student'
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgId == orgId;
+    }
+
+    /**
+     * @description Rules for the /organizations collection.
+     * @path /organizations/{orgId}
+     * @allow (get) Authenticated user can read organization data.
+     * @deny (create) Only the backend or a process with appropriate credentials should create organizations.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized organization creation.
+     */
+    match /organizations/{orgId} {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /users collection.
+     * @path /users/{userId}
+     * @allow (get) Authenticated user can read their own user data.
+     * @allow (create) Authenticated user can create their own user data (self-registration).
+     * @deny (update) Authenticated user cannot update another user's data.
+     * @deny (list) Listing users is not allowed.
+     * @principle Enforces document ownership for reads and writes, restricting access to a user's own data.
+     */
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && request.resource.data.id == userId;
+      allow update: if isExistingOwner(userId) && request.resource.data.id == resource.data.id;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /classes collection.
+     * @path /classes/{classId}
+     * @allow (get) Authenticated user can read class data.
+     * @deny (create) Only authorized users can create classes.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized class creation.
+     */
+    match /classes/{classId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isTeacherForOrg(request.resource.data.orgId);
+      allow update: if isTeacherForOrg(resource.data.orgId);
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /playlists collection.
+     * @path /playlists/{playlistId}
+     * @allow (get) Authenticated user can read playlist data.
+     * @deny (create) Only authorized users can create playlists.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized playlist creation.
+     */
+    match /playlists/{playlistId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isTeacherForOrg(request.resource.data.orgId);
+      allow update: if isTeacherForOrg(resource.data.orgId);
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /videos collection.
+     * @path /videos/{videoId}
+     * @allow (get) Authenticated user can read video data.
+     * @deny (create) Only authorized users can create videos.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized video creation.
+     */
+    match /videos/{videoId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isTeacherForOrg(request.resource.data.orgId);
+      allow update: if isTeacherForOrg(resource.data.orgId);
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /videos/{videoId}/segments collection.
+     * @path /videos/{videoId}/segments/{segmentId}
+     * @allow (get) Authenticated user can read segment data.
+     * @deny (create) Only authorized users can create segments.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized segment creation.
+     */
+    match /videos/{videoId}/segments/{segmentId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isTeacherForOrg(get(/databases/$(database)/documents/videos/$(videoId)).data.orgId);
+      allow update: if isTeacherForOrg(get(/databases/$(database)/documents/videos/$(videoId)).data.orgId);
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /videos/{videoId}/segments/{segmentId}/questions collection.
+     * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
+     * @allow (get) Authenticated user can read question data.
+     * @deny (create) Only authorized users can create questions.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized question creation.
+     */
+    match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isTeacherForOrg(get(/databases/$(database)/documents/videos/$(videoId)).data.orgId);
+      allow update: if isTeacherForOrg(get(/databases/$(database)/documents/videos/$(videoId)).data.orgId);
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /assignments collection.
+     * @path /assignments/{assignmentId}
+     * @allow (get) Authenticated user can read assignment data.
+     * @deny (create) Only authorized users can create assignments.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized assignment creation.
+     */
+    match /assignments/{assignmentId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isTeacherForOrg(request.resource.data.orgId);
+      allow update: if isTeacherForOrg(resource.data.orgId);
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /progress collection.
+     * @path /progress/{progressId}
+     * @allow (get) Authenticated user can read progress data.
+     * @deny (create) Only authorized users can create progress entries.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized progress creation.
+     */
+    match /progress/{progressId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isStudentForOrg(get(/databases/$(database)/documents/users/$(request.resource.data.userId)).data.orgId);
+      allow update: if isStudentForOrg(get(/databases/$(database)/documents/users/$(resource.data.userId)).data.orgId);
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /attempts collection.
+     * @path /attempts/{attemptId}
+     * @allow (get) Authenticated user can read attempt data.
+     * @deny (create) Only authorized users can create attempt entries.
+     * @principle Requires authentication for read access and restricts creation to prevent unauthorized attempt creation.
+     */
+    match /attempts/{attemptId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isStudentForOrg(get(/databases/$(database)/documents/users/$(request.resource.data.userId)).data.orgId);
+      allow update: if isStudentForOrg(get(/databases/$(database)/documents/users/$(resource.data.userId)).data.orgId);
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /subscription_plans collection.
+     * @path /subscription_plans/{subscriptionPlanId}
+     * @allow (get) Authenticated user can read subscription plan data.
+     * @deny (create) Only admins can create subscription plans.
+     */
+    match /subscription_plans/{subscriptionPlanId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    /**
+     * @description Rules for the /teacher_subscriptions collection.
+     * @path /teacher_subscriptions/{teacherSubscriptionId}
+     */
+    match /teacher_subscriptions/{teacherSubscriptionId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isAdmin(); // Only admins can create new teacher subscriptions
+      allow update: if isAdmin(); // Only admins can update teacher subscriptions
+      allow delete: if false;
     }
   }
 }
