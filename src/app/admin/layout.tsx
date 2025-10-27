@@ -68,7 +68,8 @@ export default function AdminDashboardLayout({
     if (auth) {
       await auth.signOut();
     }
-    router.push("/login");
+    // Force a reload to clear any cached session data
+    window.location.href = '/login';
   };
 
   if (isUserLoading || isUserDataLoading || userRole !== 'admin') {
