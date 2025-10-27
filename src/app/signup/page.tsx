@@ -55,15 +55,6 @@ export default function SignupPage() {
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email === 'admin@ilearn.com' && password !== '123456789') {
-        toast({
-            variant: "destructive",
-            title: "Signup failed",
-            description: "Invalid password for admin registration.",
-        });
-        return;
-    }
-
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
