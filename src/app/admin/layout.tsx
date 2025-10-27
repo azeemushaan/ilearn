@@ -13,12 +13,12 @@ import {
 } from "@/components/ui/sidebar";
 import {
   Home,
-  PlaySquare,
-  Users,
-  BarChart3,
   Settings,
   HelpCircle,
   LogOut,
+  CreditCard,
+  Package,
+  Shield,
 } from "lucide-react";
 import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -29,7 +29,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-export default function DashboardLayout({
+export default function AdminDashboardLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -45,16 +45,23 @@ export default function DashboardLayout({
     return doc(firestore, "users", user.uid);
   }, [firestore, user]);
 
-  const { data: userData } = useDoc(userDocRef);
+  const { data: userData, isLoading: isUserDataLoading } = useDoc(userDocRef);
 
   useEffect(() => {
     if (!isUserLoading && !user) {
       router.push("/login");
     }
     if (userData) {
-      setUserRole((userData as any).role);
+        const role = (userData as any).role;
+        setUserRole(role);
+        if (role !== 'admin') {
+            router.push('/dashboard');
+        }
+    } else if (!isUserLoading && !isUserDataLoading && !userData) {
+        // If user exists but no user document, they can't be admin
+        router.push('/dashboard');
     }
-  }, [user, isUserLoading, router, userData]);
+  }, [user, isUserLoading, router, userData, isUserDataLoading]);
 
   const handleLogout = async () => {
     if (auth) {
@@ -63,8 +70,8 @@ export default function DashboardLayout({
     router.push("/login");
   };
 
-  if (isUserLoading || !userRole) {
-    return <div>Loading...</div>; // Or a proper loading spinner
+  if (isUserLoading || isUserDataLoading || userRole !== 'admin') {
+    return <div>Loading and verifying admin access...</div>; 
   }
 
   return (
@@ -78,37 +85,34 @@ export default function DashboardLayout({
         </SidebarHeader>
         <SidebarContent>
           <SidebarMenu>
+             <SidebarMenuItem>
+                 <div className="px-2 py-1 text-xs font-medium text-muted-foreground flex items-center gap-2">
+                    <Shield size={16} /> <span>Admin</span>
+                 </div>
+            </SidebarMenuItem>
             <SidebarMenuItem>
                 <SidebarMenuButton asChild>
-                  <Link href="/dashboard">
+                  <Link href="/admin/dashboard">
                     <Home />
                     <span>Dashboard</span>
                   </Link>
                 </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/playlists">
-                  <PlaySquare />
-                  <span>Playlists</span>
+                <SidebarMenuButton asChild>
+                <Link href="/admin/subscriptions">
+                    <Package />
+                    <span>Subscriptions</span>
                 </Link>
-              </SidebarMenuButton>
+                </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/classes">
-                  <Users />
-                  <span>Classes</span>
+                <SidebarMenuButton asChild>
+                <Link href="/admin/payments">
+                    <CreditCard />
+                    <span>Payments</span>
                 </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/analytics">
-                  <BarChart3 />
-                  <span>Analytics</span>
-                </Link>
-              </SidebarMenuButton>
+                </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarContent>
@@ -133,7 +137,7 @@ export default function DashboardLayout({
           </SidebarMenu>
           <div className="flex items-center gap-3 p-2 rounded-lg bg-secondary">
              <Avatar className="h-9 w-9">
-              <AvatarImage src={user?.photoURL || "https://picsum.photos/seed/user/100/100"} alt="User avatar" />
+              <AvatarImage src={user?.photoURL || "https://picsum.photos/seed/admin/100/100"} alt="Admin avatar" />
               <AvatarFallback>{user?.email?.[0].toUpperCase()}</AvatarFallback>
             </Avatar>
             <div className="flex-1 overflow-hidden">

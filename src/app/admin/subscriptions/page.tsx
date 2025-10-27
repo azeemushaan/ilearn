@@ -47,7 +47,7 @@ export default function SubscriptionsPage() {
   
   const { data: plans, isLoading } = useCollection(plansCollectionRef);
 
-  const { register, handleSubmit, control, formState: { errors } } = useForm<PlanFormValues>({
+  const { register, handleSubmit, control, reset, formState: { errors } } = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema),
     defaultValues: {
         name: "",
@@ -74,6 +74,7 @@ export default function SubscriptionsPage() {
         description: "The new subscription plan has been added.",
       });
       setOpen(false);
+      reset();
     } catch (error: any) {
       toast({
         variant: "destructive",

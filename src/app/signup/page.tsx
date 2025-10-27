@@ -6,11 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Logo from "@/components/logo";
 import { useAuth, useFirestore } from "@/firebase";
-import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword } from "firebase/auth";
+import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc } from "firebase/firestore";
 
 const GoogleIcon = () => (
     <svg className="mr-2 h-4 w-4" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
@@ -28,6 +28,16 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  const handleLoginSuccess = async (user: User) => {
+    const userDocRef = doc(firestore, "users", user.uid);
+    const userDoc = await getDoc(userDocRef);
+    if (userDoc.exists() && userDoc.data().role === 'admin') {
+      router.push("/admin/dashboard");
+    } else {
+      router.push("/dashboard");
+    }
+  };
+
   const handleGoogleSignup = async () => {
     const provider = new GoogleAuthProvider();
     try {
@@ -40,10 +50,10 @@ export default function SignupPage() {
         email: user.email,
         firstName: user.displayName?.split(' ')[0] || '',
         lastName: user.displayName?.split(' ')[1] || '',
-        role: 'teacher'
+        role: 'teacher' // Google signup always defaults to teacher
       }, { merge: true });
 
-      router.push("/dashboard");
+      await handleLoginSuccess(user);
     } catch (error: any) {
       toast({
         variant: "destructive",
@@ -58,6 +68,7 @@ export default function SignupPage() {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
+      const role = email === 'admin@ilearn.com' ? 'admin' : 'teacher';
 
       const userRef = doc(firestore, "users", user.uid);
       await setDoc(userRef, {
@@ -65,10 +76,10 @@ export default function SignupPage() {
         email: user.email,
         firstName: name.split(' ')[0] || '',
         lastName: name.split(' ')[1] || '',
-        role: email === 'admin@ilearn.com' ? 'admin' : 'teacher'
+        role: role
       }, { merge: true });
 
-      router.push("/dashboard");
+      await handleLoginSuccess(user);
     } catch (error: any) {
       toast({
         variant: "destructive",
