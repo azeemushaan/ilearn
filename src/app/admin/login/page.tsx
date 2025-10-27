@@ -22,23 +22,34 @@ export default function AdminLoginPage() {
 
   const handleLoginSuccess = async (user: User) => {
     if (!auth) return;
+    console.log(`Verifying admin access for user: ${user.email}`);
 
     // Force a token refresh to get the latest custom claims
+    console.log("Forcing token refresh...");
     await user.getIdToken(true);
     const tokenResult = await user.getIdTokenResult();
     const claims = tokenResult.claims;
 
-    // Debugging Toast: Display the claims
+    console.log("User claims from token:", claims);
+    
+    // Display the claims in a toast for easy debugging
     toast({
       title: "User Claims Verified",
-      description: <pre className="mt-2 w-[340px] rounded-md bg-slate-950 p-4"><code className="text-white">{JSON.stringify(claims, null, 2)}</code></pre>,
-      duration: 10000, // Keep toast open longer for debugging
+      description: (
+        <div className="mt-2 w-[340px] rounded-md bg-slate-950 p-4">
+          <p className="text-white">Role from token: '{claims.role || "Not Found"}'</p>
+          <pre><code className="text-white">{JSON.stringify(claims, null, 2)}</code></pre>
+        </div>
+      ),
+      duration: 15000, // Keep toast open longer for debugging
     });
 
-
+    console.log(`Checking if claims.role ('${claims.role}') === 'admin'`);
     if (claims.role === 'admin') {
+      console.log("Admin check PASSED. Redirecting to /admin/dashboard...");
       router.push("/admin/dashboard");
     } else {
+      console.log("Admin check FAILED. Signing out and showing 'Access Denied'.");
       // If the user is not an admin, deny access and sign them out.
       await auth.signOut();
       toast({
@@ -63,6 +74,7 @@ export default function AdminLoginPage() {
         title: "Login failed",
         description: error.message,
       });
+      console.error("Login Error:", error);
       setIsLoading(false);
     }
   };
@@ -90,7 +102,7 @@ export default function AdminLoginPage() {
               <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={isLoading}>
-              {isLoading ? "Logging in..." : "Login"}
+              {isLoading ? "Verifying..." : "Login"}
             </Button>
           </form>
         </CardContent>
