@@ -12,17 +12,14 @@ import * as admin from 'firebase-admin';
 
 // Initialize Firebase Admin SDK if not already initialized
 if (admin.apps.length === 0) {
-  // In a real production environment, you would use a more secure way 
-  // to handle credentials, such as environment variables or a secret manager.
-  // For this environment, we'll check for an env var.
   try {
+    // In a managed server environment (like Cloud Run), initializeApp()
+    // without arguments will use the service account associated with the instance.
     admin.initializeApp();
-  } catch(e) {
-    console.error("Default admin.initializeApp() failed. This is expected in local dev without GOOGLE_APPLICATION_CREDENTIALS.", e);
-    // Fallback for local development if default credentials aren't set
-    // NOTE: This part might need adjustment based on the specific dev environment setup.
-    // If you have a service account JSON file, you can load it here.
-    // For now, we rely on the server environment having the credentials.
+    console.log("[Admin SDK] Initialized successfully using default credentials.");
+  } catch(e: any) {
+    // This catch block is for local development or misconfigured environments.
+    console.error("[Admin SDK] FATAL: Default admin.initializeApp() failed. The server environment is not configured with Google Application Credentials. Custom claims cannot be set.", e.message);
   }
 }
 
@@ -49,6 +46,13 @@ const setUserClaimsFlow = ai.defineFlow(
     }),
   },
   async ({ uid, claims }) => {
+    // Ensure the Admin SDK is initialized before proceeding.
+    if (admin.apps.length === 0) {
+      const errorMessage = "[Admin SDK] Flow aborted: Firebase Admin SDK is not initialized.";
+      console.error(errorMessage);
+      return { success: false, message: errorMessage };
+    }
+    
     try {
       console.log(`[Admin SDK] Attempting to set claims for UID: ${uid}`, claims);
       await admin.auth().setCustomUserClaims(uid, claims);
