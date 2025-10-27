@@ -39,7 +39,9 @@ export default function SignupPage() {
   };
 
   const createOrUpdateUserDocument = async (user: User, role: 'admin' | 'teacher', name: string) => {
+    if (!firestore) return;
     const userRef = doc(firestore, "users", user.uid);
+    
     let userData: any = {
       id: user.uid,
       email: user.email,
@@ -51,7 +53,7 @@ export default function SignupPage() {
     if (role === 'admin') {
         userData.firstName = 'Admin';
         userData.lastName = '';
-        userData.email_verified = true;
+        userData.email_verified = true; // Explicitly set for admin
     } else {
         userData.firstName = name.split(' ')[0] || '';
         userData.lastName = name.split(' ').slice(1).join(' ') || '';
