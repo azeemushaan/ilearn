@@ -13,12 +13,15 @@ import { toast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@/firebase/auth/use-user';
 
+// Helper to allow empty strings during validation which are then defaulted
+const zstring = () => z.string().optional().default('');
+
 const themeSchema = z.object({
   background: z.string(),
   foreground: z.string(),
   primary: z.string(),
   'primary-foreground': z.string(),
-  secondary: zstring(),
+  secondary: z.string(),
   'secondary-foreground': z.string(),
   accent: z.string(),
   'accent-foreground': z.string(),
@@ -130,6 +133,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-
-// Helper to allow empty strings during validation which are then defaulted
-const zstring = () => z.string().optional().default('');
