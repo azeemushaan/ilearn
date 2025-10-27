@@ -40,15 +40,24 @@ export default function SignupPage() {
 
   const createOrUpdateUserDocument = async (user: User, role: 'admin' | 'teacher', name: string) => {
     const userRef = doc(firestore, "users", user.uid);
-    await setDoc(userRef, {
+    let userData: any = {
       id: user.uid,
       email: user.email,
-      firstName: name.split(' ')[0] || '',
-      lastName: name.split(' ')[1] || '',
       role: role,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    };
+
+    if (role === 'admin') {
+        userData.firstName = 'Admin';
+        userData.lastName = '';
+        userData.email_verified = true;
+    } else {
+        userData.firstName = name.split(' ')[0] || '';
+        userData.lastName = name.split(' ')[1] || '';
+    }
+
+    await setDoc(userRef, userData, { merge: true });
   }
 
   const handleGoogleSignup = async () => {
