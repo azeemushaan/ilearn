@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Logo from "@/components/logo";
 import { useAuth } from "@/firebase";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import { signInWithEmailAndPassword, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -20,15 +20,35 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  const handleLoginSuccess = async (user: User) => {
+    if (!auth) return;
+
+    // Force a token refresh to get the latest custom claims
+    await user.getIdToken(true);
+    const tokenResult = await user.getIdTokenResult();
+    const claims = tokenResult.claims;
+
+    if (claims.role === 'admin') {
+      router.push("/admin/dashboard");
+    } else {
+      // If the user is not an admin, deny access and sign them out.
+      await auth.signOut();
+      toast({
+        variant: "destructive",
+        title: "Access Denied",
+        description: "You do not have administrative privileges.",
+      });
+      setIsLoading(false);
+    }
+  };
+
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth) return;
     setIsLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      // The layout protecting /admin/dashboard will handle the redirect
-      // after auth state is confirmed. We just need to push them there.
-      router.push("/admin/dashboard");
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      await handleLoginSuccess(userCredential.user);
     } catch (error: any) {
       toast({
         variant: "destructive",
