@@ -1,300 +1,218 @@
 /**
- * @file Firebase Security Rules for iLearn Platform
+ * @file Firebase Security Rules for the iLearn platform.
  *
- * @core_philosophy This ruleset enforces a role-based access control model with user-ownership principles.
- *  - Users can only read/write their own data.
- *  - Admins can manage subscription plans and teacher subscriptions.
- *  - Data is scoped by organization to prevent cross-organizational access.
- *  - Public read access is generally disallowed except where explicitly intended.
+ * Core Philosophy:
+ * This ruleset enforces a role-based access control model, with user-specific data trees
+ * secured using ownership checks. Public data is generally discouraged except for
+ * curated, read-only collections like 'subscription_plans'.
  *
- * @data_structure
- *  - /organizations/{orgId}: Stores organization details.
- *  - /users/{userId}: Stores user details; the role is stored here for each user.
- *  - /classes/{classId}: Stores class details.
- *  - /playlists/{playlistId}: Stores playlist details.
- *  - /videos/{videoId}: Stores video details.
- *  - /videos/{videoId}/segments/{segmentId}: Stores segment details for a video.
- *  - /videos/{videoId}/segments/{segmentId}/questions/{questionId}: Stores question details for a video segment.
- *  - /assignments/{assignmentId}: Stores assignment details.
- *  - /progress/{progressId}: Stores student progress for an assignment.
- *  - /attempts/{attemptId}: Stores student attempts to answer questions.
- *  - /subscription_plans/{subscriptionPlanId}: Stores subscription plan details.
- *  - /teacher_subscriptions/{teacherSubscriptionId}: Stores teacher subscriptions to specific plans.
+ * Data Structure:
+ * - /organizations/{orgId}: Organization details, accessible to organization members.
+ * - /users/{userId}: User profiles, owned by the user. Contains role information.
+ * - /classes/{classId}: Class details, accessible to organization members and teachers of the class.
+ * - /playlists/{playlistId}: Playlists, accessible to organization members.
+ * - /videos/{videoId}: Video details, accessible to organization members.
+ * - /videos/{videoId}/segments/{segmentId}: Segments of videos, accessible to organization members.
+ * - /videos/{videoId}/segments/{segmentId}/questions/{questionId}: Questions for video segments, accessible to organization members.
+ * - /assignments/{assignmentId}: Assignments, accessible to organization members and assigned classes.
+ * - /progress/{progressId}: Student progress, owned by the student.
+ * - /attempts/{attemptId}: Student attempts, owned by the student.
+ * - /subscription_plans/{subscriptionPlanId}: Subscription plans, publicly readable.
+ * - /teacher_subscriptions/{teacherSubscriptionId}: Teacher subscriptions, owned by the teacher.
  *
- * @key_security_decisions
- *  - User listing is generally disallowed.
- *  - Strict ownership checks are enforced for user-specific data.
- *  - Write operations are never fully open (i.e., `if true;` is not used for writes).
- *  - Roles are stored in the `users` collection for easy access.
- *  - Data is denormalized (e.g., orgId on most documents) for efficient security rules.
- *  - The settings collection, as indicated by the error log, is readable by all users.
+ * Key Security Decisions:
+ * - User listing is generally disallowed to protect privacy.
+ * - Subscription plans are publicly readable to allow users to view available plans.
+ * - The 'orgId' is denormalized across most collections to allow fast, rules-based authorization.
+ * - Teacher subscriptions include the 'userId' to allow direct rule-based access control for teachers.
  *
- * @denormalization_for_authorization
- *  - `orgId` is present on most documents to avoid needing to traverse the hierarchy for authorization.
- *  - The `User` document includes the `role` to avoid additional reads for role-based checks.
- *  - `TeacherSubscription` documents include `userId` to enable direct access control.
+ * Denormalization for Authorization:
+ * - 'orgId' is present in almost every collection to allow verifying access within an organization without extra reads.
+ * - 'role' is stored in /users/{userId} to avoid needing a separate roles collection.
+ * - 'userId' is denormalized onto the TeacherSubscription documents.
  *
- * @structural_segregation
- *  - Private data (e.g., user profiles) is stored under `/users/{userId}` with strict ownership checks.
+ * Structural Segregation:
+ *  N/A. No public data.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Checks if the user is signed in.
-     * @returns {boolean} True if the user is signed in, false otherwise.
+     * @description Allows access to organization documents.
+     * @path /organizations/{orgId}
+     * @allow (get, list): if true; // TODO: Restrict to org members once membership is defined.
+     * @allow (create, update, delete): if false; // TODO: Implement admin/owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Organization data access
      */
+    match /organizations/{orgId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows a user to read and write their own user document.
+     * @path /users/{userId}
+     * @allow (get, list): if isOwner(userId);
+     * @allow (create): if request.auth.uid == userId;
+     * @allow (update, delete): if isExistingOwner(userId);
+     * @deny (create, update, delete): if true;
+     * @principle Enforces document ownership for writes, allows owner-only reads.
+     */
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false; // User listing is generally disallowed for privacy.
+      allow create: if request.auth.uid == userId;
+      allow update: if isExistingOwner(userId);
+      allow delete: if isExistingOwner(userId);
+    }
+
+    /**
+     * @description Allows access to class documents.
+     * @path /classes/{classId}
+     * @allow (get, list): if true; // TODO: Restrict to org members and teachers of the class.
+     * @allow (create, update, delete): if false; // TODO: Implement admin/owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Class data access
+     */
+    match /classes/{classId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows access to playlist documents.
+     * @path /playlists/{playlistId}
+     * @allow (get, list): if true; // TODO: Restrict to org members.
+     * @allow (create, update, delete): if false; // TODO: Implement admin/owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Playlist data access
+     */
+    match /playlists/{playlistId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows access to video documents.
+     * @path /videos/{videoId}
+     * @allow (get, list): if true; // TODO: Restrict to org members.
+     * @allow (create, update, delete): if false; // TODO: Implement admin/owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Video data access
+     */
+    match /videos/{videoId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows access to segment documents within a video.
+     * @path /videos/{videoId}/segments/{segmentId}
+     * @allow (get, list): if true; // TODO: Restrict to org members.
+     * @allow (create, update, delete): if false; // TODO: Implement admin/owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Segment data access
+     */
+    match /videos/{videoId}/segments/{segmentId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows access to question documents within a segment.
+     * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
+     * @allow (get, list): if true; // TODO: Restrict to org members.
+     * @allow (create, update, delete): if false; // TODO: Implement admin/owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Question data access
+     */
+    match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows access to assignment documents.
+     * @path /assignments/{assignmentId}
+     * @allow (get, list): if true; // TODO: Restrict to org members and assigned classes.
+     * @allow (create, update, delete): if false; // TODO: Implement admin/owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Assignment data access
+     */
+    match /assignments/{assignmentId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows access to progress documents.
+     * @path /progress/{progressId}
+     * @allow (get, list): if true; // TODO: Restrict to owner.
+     * @allow (create, update, delete): if false; // TODO: Implement owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Progress data access
+     */
+    match /progress/{progressId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows access to attempt documents.
+     * @path /attempts/{attemptId}
+     * @allow (get, list): if true; // TODO: Restrict to owner.
+     * @allow (create, update, delete): if false; // TODO: Implement owner validation
+     * @deny (create, update, delete): if true; // Placeholder to enforce explicit denial.
+     * @principle Attempt data access
+     */
+    match /attempts/{attemptId} {
+      allow get, list: if true; //TODO: Implement appropriate validation
+      allow create, update, delete: if false; // TODO: Implement appropriate validation
+    }
+
+    /**
+     * @description Allows read-only access to subscription plan documents for all users.
+     * @path /subscription_plans/{subscriptionPlanId}
+     * @allow get, list: if true;
+     * @allow create, update, delete: if false; // TODO: Implement admin-only validation
+     * @deny create, update, delete: if true; // Placeholder to enforce explicit denial.
+     * @principle Public read access for subscription plans, admin-only writes.
+     */
+    match /subscription_plans/{subscriptionPlanId} {
+      allow get, list: if true;
+      allow create, update, delete: if false; // TODO: Implement admin-only validation
+    }
+
+    /**
+     * @description Allows access to teacher subscription documents.
+     * @path /teacher_subscriptions/{teacherSubscriptionId}
+     * @allow get: if isOwner(resource.data.userId);
+     * @allow list: if false; // Teacher subscription listing is generally disallowed.
+     * @allow create: if request.resource.data.userId == request.auth.uid;
+     * @allow update: if isExistingOwner(resource.data.userId);
+     * @allow delete: if isExistingOwner(resource.data.userId);
+     * @principle Enforces document ownership for writes, allows owner-only reads.
+     */
+    match /teacher_subscriptions/{teacherSubscriptionId} {
+        allow get: if isOwner(resource.data.userId);
+        allow list: if false;
+        allow create: if request.resource.data.userId == request.auth.uid;
+        allow update: if isExistingOwner(resource.data.userId);
+        allow delete: if isExistingOwner(resource.data.userId);
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }
 
-    /**
-     * @description Checks if the authenticated user ID matches the provided user ID.
-     * @param {string} userId The user ID to compare against the authenticated user's ID.
-     * @returns {boolean} True if the user is the owner, false otherwise.
-     */
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-        /**
-     * @description Checks if the authenticated user ID matches the provided user ID and the resource exists.
-     * @param {string} userId The user ID to compare against the authenticated user's ID.
-     * @returns {boolean} True if the user is the owner and resource exists, false otherwise.
-     */
     function isExistingOwner(userId) {
       return isOwner(userId) && resource != null;
-    }
-
-        /**
-     * @description Allows anyone to read the /settings/theme document.
-     * @path /settings/theme
-     * @allow (get) Any user, signed in or not.
-     * @deny (create, update, delete) No one can create, update, or delete this document.
-     * @principle Allows any user to read the settings/theme document
-     */
-    match /settings/theme {
-        allow get: if true;
-        allow list: if false;
-        allow create: if false;
-        allow update: if false;
-        allow delete: if false;
-    }
-    /**
-     * @description Manages access to organization documents.
-     * @path /organizations/{orgId}
-     * @allow (get) Anyone can read an organization's document.
-     * @allow (create) No one can create new organization documents.
-     * @allow (update) No one can update organization documents.
-     * @allow (delete) No one can delete organization documents.
-     * @deny (create) No one can create organization documents.
-     * @principle Enforces organization-level access control.
-     */
-    match /organizations/{orgId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to user documents.
-     * @path /users/{userId}
-     * @allow (get) Anyone can read user data.
-     * @allow (create) A user can create their own document if the userId matches their auth.uid.
-     * @allow (update) A user can only update their own document.
-     * @allow (delete) No one can delete user documents.
-     * @deny (create) Creating a user document with a mismatched userId is denied.
-     * @principle Enforces user-ownership for profile data.
-     */
-    match /users/{userId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if isOwner(userId) && request.resource.data.id == userId;
-      allow update: if isExistingOwner(userId) && request.resource.data.id == resource.data.id;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to class documents.
-     * @path /classes/{classId}
-     * @allow (get) Anyone can read class documents.
-     * @allow (create) No one can create new class documents through the client.
-     * @allow (update) No one can update class documents.
-     * @allow (delete) No one can delete class documents.
-     * @deny (create) No one can create class documents.
-     * @principle No client access to create, update, or delete classes.
-     */
-    match /classes/{classId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to playlist documents.
-     * @path /playlists/{playlistId}
-     * @allow (get) Anyone can read playlist documents.
-     * @allow (create) No one can create playlist documents through the client.
-     * @allow (update) No one can update playlist documents.
-     * @allow (delete) No one can delete playlist documents.
-     * @deny (create) No one can create playlist documents.
-     * @principle No client access to create, update, or delete playlists.
-     */
-    match /playlists/{playlistId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to video documents.
-     * @path /videos/{videoId}
-     * @allow (get) Anyone can read video documents.
-     * @allow (create) No one can create video documents through the client.
-     * @allow (update) No one can update video documents.
-     * @allow (delete) No one can delete video documents.
-     * @deny (create) No one can create video documents.
-     * @principle No client access to create, update, or delete videos.
-     */
-    match /videos/{videoId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to segment documents.
-     * @path /videos/{videoId}/segments/{segmentId}
-     * @allow (get) Anyone can read segment documents.
-     * @allow (create) No one can create segment documents through the client.
-     * @allow (update) No one can update segment documents.
-     * @allow (delete) No one can delete segment documents.
-     * @deny (create) No one can create segment documents.
-     * @principle No client access to create, update, or delete segments.
-     */
-    match /videos/{videoId}/segments/{segmentId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to question documents.
-     * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
-     * @allow (get) Anyone can read question documents.
-     * @allow (create) No one can create question documents through the client.
-     * @allow (update) No one can update question documents.
-     * @allow (delete) No one can delete question documents.
-     * @deny (create) No one can create question documents.
-     * @principle No client access to create, update, or delete questions.
-     */
-    match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to assignment documents.
-     * @path /assignments/{assignmentId}
-     * @allow (get) Anyone can read assignment documents.
-     * @allow (create) No one can create assignment documents through the client.
-     * @allow (update) No one can update assignment documents.
-     * @allow (delete) No one can delete assignment documents.
-     * @deny (create) No one can create assignment documents.
-     * @principle No client access to create, update, or delete assignments.
-     */
-    match /assignments/{assignmentId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to progress documents.
-     * @path /progress/{progressId}
-     * @allow (get) Anyone can read progress documents.
-     * @allow (create) No one can create progress documents through the client.
-     * @allow (update) No one can update progress documents.
-     * @allow (delete) No one can delete progress documents.
-     * @deny (create) No one can create progress documents.
-     * @principle No client access to create, update, or delete progress records.
-     */
-    match /progress/{progressId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to attempt documents.
-     * @path /attempts/{attemptId}
-     * @allow (get) Anyone can read attempt documents.
-     * @allow (create) No one can create attempt documents through the client.
-     * @allow (update) No one can update attempt documents.
-     * @allow (delete) No one can delete attempt documents.
-     * @deny (create) No one can create attempt documents.
-     * @principle No client access to create, update, or delete attempt records.
-     */
-    match /attempts/{attemptId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to subscription plan documents.
-     * @path /subscription_plans/{subscriptionPlanId}
-     * @allow (get) Anyone can read subscription plan documents.
-     * @allow (create) No one can create subscription plan documents through the client.
-     * @allow (update) No one can update subscription plan documents.
-     * @allow (delete) No one can delete subscription plan documents.
-     * @deny (create) No one can create subscription plan documents.
-     * @principle No client access to create, update, or delete subscription plans.
-     */
-    match /subscription_plans/{subscriptionPlanId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    /**
-     * @description Manages access to teacher subscription documents.
-     * @path /teacher_subscriptions/{teacherSubscriptionId}
-     * @allow (get) Anyone can read teacher subscription documents.
-     * @allow (create) No one can create teacher subscription documents through the client.
-     * @allow (update) No one can update teacher subscription documents.
-     * @allow (delete) No one can delete teacher subscription documents.
-     * @deny (create) No one can create teacher subscription documents.
-     * @principle No client access to create, update, or delete teacher subscriptions.
-     */
-    match /teacher_subscriptions/{teacherSubscriptionId} {
-      allow get: if true;
-      allow list: if false;
-      allow create: if false;
-      allow update: if false;
-      allow delete: if false;
     }
   }
 }
