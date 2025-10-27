@@ -54,7 +54,8 @@ export default function SignupPage() {
         userData.email_verified = true;
     } else {
         userData.firstName = name.split(' ')[0] || '';
-        userData.lastName = name.split(' ')[1] || '';
+        userData.lastName = name.split(' ').slice(1).join(' ') || '';
+        userData.email_verified = user.emailVerified;
     }
 
     await setDoc(userRef, userData, { merge: true });
