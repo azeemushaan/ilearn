@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,9 +12,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { toast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@/firebase/auth/use-user';
-
-// Helper to allow empty strings during validation which are then defaulted
-const zstring = () => z.string().optional().default('');
+import { Separator } from '@/components/ui/separator';
 
 const themeSchema = z.object({
   background: z.string(),
@@ -30,6 +28,74 @@ const themeSchema = z.object({
 });
 
 type ThemeFormValues = z.infer<typeof themeSchema>;
+
+function hslStringToHex(hslStr: string): string {
+    if (!hslStr) return '#000000';
+    const [h, s, l] = hslStr.split(' ').map(val => parseFloat(val.replace('%', '')));
+    const sDecimal = s / 100;
+    const lDecimal = l / 100;
+    const c = (1 - Math.abs(2 * lDecimal - 1)) * sDecimal;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = lDecimal - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h >= 0 && h < 60) { [r, g, b] = [c, x, 0]; }
+    else if (h >= 60 && h < 120) { [r, g, b] = [x, c, 0]; }
+    else if (h >= 120 && h < 180) { [r, g, b] = [0, c, x]; }
+    else if (h >= 180 && h < 240) { [r, g, b] = [0, x, c]; }
+    else if (h >= 240 && h < 300) { [r, g, b] = [x, 0, c]; }
+    else if (h >= 300 && h < 360) { [r, g, b] = [c, 0, x]; }
+    r = Math.round((r + m) * 255);
+    g = Math.round((g + m) * 255);
+    b = Math.round((b + m) * 255);
+    return `#${[r, g, b].map(c => c.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function hexToHslString(hex: string): string {
+    let r = 0, g = 0, b = 0;
+    if (hex.length === 4) {
+        r = parseInt(hex[1] + hex[1], 16);
+        g = parseInt(hex[2] + hex[2], 16);
+        b = parseInt(hex[3] + hex[3], 16);
+    } else if (hex.length === 7) {
+        r = parseInt(hex.substring(1, 3), 16);
+        g = parseInt(hex.substring(3, 5), 16);
+        b = parseInt(hex.substring(5, 7), 16);
+    }
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0, l = (max + min) / 2;
+    if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+    }
+    h = Math.round(h * 360);
+    s = Math.round(s * 100);
+    l = Math.round(l * 100);
+    return `${h} ${s}% ${l}%`;
+}
+
+
+const ColorPickerInput = ({ value, onChange }: { value: string, onChange: (value: string) => void }) => {
+    const hexValue = value ? hslStringToHex(value) : '#000000';
+
+    const handleHexChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        onChange(hexToHslString(e.target.value));
+    };
+
+    return (
+        <div className="flex items-center gap-2">
+            <Input type="color" value={hexValue} onChange={handleHexChange} className="h-10 w-10 p-1" />
+            <Input type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder="e.g. 227 47% 20%" />
+        </div>
+    );
+};
+
 
 export default function SettingsPage() {
   const firestore = useFirestore();
@@ -107,28 +173,51 @@ export default function SettingsPage() {
         <p className="text-muted-foreground mt-1">Customize the look and feel of the iLearn platform.</p>
       </header>
       <main className="flex-1 p-4 md:p-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Color Scheme</CardTitle>
-            <CardDescription>Enter HSL values (e.g., '225 100% 97%') for each color. Changes will apply globally.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {Object.keys(themeSchema.shape).map((key) => (
-                  <div key={key} className="grid gap-2">
-                    <Label htmlFor={key} className="capitalize">{key.replace('-', ' ')}</Label>
-                    <Input id={key} {...register(key as keyof ThemeFormValues)} />
-                    {errors[key as keyof ThemeFormValues] && <p className="text-red-500 text-sm">{errors[key as keyof ThemeFormValues]?.message}</p>}
-                  </div>
-                ))}
+        <form onSubmit={handleSubmit(onSubmit)}>
+          <Card>
+            <CardHeader>
+              <CardTitle>Branding</CardTitle>
+              <CardDescription>Upload your organization's logo.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2">
+                <Label htmlFor="logo">Logo</Label>
+                <Input id="logo" type="file" />
+                <p className="text-sm text-muted-foreground">
+                  (Logo upload functionality coming soon)
+                </p>
               </div>
-              <div className="mt-6 flex justify-end">
-                <Button type="submit">Save Changes</Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          <Separator className="my-6" />
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Color Scheme</CardTitle>
+              <CardDescription>Use the color pickers or enter HSL values directly. Changes will apply globally.</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {Object.keys(themeSchema.shape).map((key) => (
+                    <div key={key} className="grid gap-2">
+                      <Label htmlFor={key} className="capitalize">{key.replace('-', ' ')}</Label>
+                      <Controller
+                          name={key as keyof ThemeFormValues}
+                          control={control}
+                          render={({ field }) => <ColorPickerInput {...field} />}
+                        />
+                      {errors[key as keyof ThemeFormValues] && <p className="text-red-500 text-sm">{errors[key as keyof ThemeFormValues]?.message}</p>}
+                    </div>
+                  ))}
+                </div>
+            </CardContent>
+          </Card>
+          
+          <div className="mt-6 flex justify-end">
+            <Button type="submit">Save Changes</Button>
+          </div>
+        </form>
       </main>
     </div>
   );
