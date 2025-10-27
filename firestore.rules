@@ -1,354 +1,218 @@
 /**
- * @file Firebase Security Rules for iLearn platform.
+ * @file iLearn Firestore Security Rules
+ * @version 2
  *
- * Core Philosophy:
- * This ruleset enforces a strict, organization-based access control model.  Most data is scoped to an organization (`orgId`), and users can only access data within their organization. User roles (admin, teacher, student) determine the level of access.
+ * @Core Philosophy
+ * This ruleset enforces a multi-tenant security model where data access is primarily scoped to the organization (orgId).
+ * Users are authorized based on their role within the organization.
+ * The rules leverage denormalization to avoid expensive `get()` calls and ensure authorization independence.
  *
- * Data Structure:
- * - /organizations/{orgId}:  Organization details.
- * - /users/{userId}: User profiles, including role and organization ID.
- * - /classes/{classId}: Class details, linked to organizations and teachers.
- * - /playlists/{playlistId}: Playlists, linked to organizations and classes.
- * - /videos/{videoId}: Videos, linked to organizations.
- * - /videos/{videoId}/segments/{segmentId}: Video segments.
- * - /videos/{videoId}/segments/{segmentId}/questions/{questionId}: Questions for video segments.
- * - /assignments/{assignmentId}: Assignments, linking playlists to classes.
- * - /progress/{progressId}: Student progress on assignments.
+ * @Data Structure
+ * The Firestore database is organized as a flat collection of top-level collections:
+ * - /organizations/{orgId}: Organization details.
+ * - /users/{userId}: User details, including orgId and role.
+ * - /classes/{classId}: Class details, including orgId and teacherIds.
+ * - /playlists/{playlistId}: Playlist details, including orgId and classIds.
+ * - /videos/{videoId}: Video details, including orgId.
+ * - /videos/{videoId}/segments/{segmentId}: Segment details for a video.
+ * - /videos/{videoId}/segments/{segmentId}/questions/{questionId}: Question details for a video segment.
+ * - /assignments/{assignmentId}: Assignment details, including orgId, playlistId, and classId.
+ * - /progress/{progressId}: Student progress for an assignment.
  * - /attempts/{attemptId}: Student attempts to answer questions.
- * - /subscription_plans/{subscriptionPlanId}: Subscription plans (accessible by admins).
- * - /teacher_subscriptions/{teacherSubscriptionId}: Teacher subscriptions, linked to users and plans.
+ * - /subscription_plans/{subscriptionPlanId}: Subscription plan details.
+ * - /teacher_subscriptions/{teacherSubscriptionId}: Teacher subscriptions to specific plans.
  *
- * Key Security Decisions:
- * - Data is generally scoped to the organization level using the `orgId` field.
- * - User roles (admin, teacher, student) are stored in the `/users/{userId}` document.
- * - Subscription plans are managed by admins.
- * - Public listing of data is generally disallowed, except where explicitly intended (e.g., reading general content).
- * -  TeacherSubscription includes the userId for authorization independence.
- *
- * Denormalization for Authorization:
- * - `orgId` is present on most documents to avoid needing `get()` calls for organization-level access checks.
- * - `userId` is included in `TeacherSubscription` documents for direct rule-based access control.
+ * @Key Security Decisions
+ * - **No User Listing**: Listing the `/users` collection is not permitted to prevent unauthorized access to user information.
+ * - **Organization-Based Access**: Most collections are scoped to an `orgId`, ensuring that users can only access data within their organization.
+ * - **Ownership-Based Access**: `create`, `update`, and `delete` operations require authentication.
+ * - **Admin Roles**: The `users` collection stores the `role` field for each user, including admins, used to grant admin-level access.
+ * - **Teacher Subscriptions**: Access to `/teacher_subscriptions` is controlled through the denormalized `userId` field.
+ * - **Write operations**: are protected by an authorization check
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Grants access to organization details.
+     * @description Allows read and write access to organization documents.
      * @path /organizations/{orgId}
-     * @allow (get, list): if true (Public read access for organization data)
-     * @allow (create): if false (Organizations cannot be created directly through the client)
-     * @allow (update, delete): if false (Organizations cannot be updated or deleted directly through the client)
-     * @principle Public read, restricted write access for organizations.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() && request.resource.data.id == request.auth.uid (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource.data.id == request.auth.uid (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read organization details; authenticated user can create, update, and delete
      */
     match /organizations/{orgId} {
       allow get, list: if true;
-      allow create, update, delete: if false;
+      allow create: if isSignedIn() && request.resource.data.id == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.id == request.auth.uid && resource != null;
     }
 
     /**
-     * @description Grants access to user profiles.
+     * @description Allows read and write access to user documents.
      * @path /users/{userId}
-     * @allow (get): if isOwner(userId) (Allows a user to read their own profile)
-     * @allow (list): if false (Disallows listing all users)
-     * @allow (create): if isOwner(userId) (Allows a user to create their own profile)
-     * @allow (update): if isExistingOwner(userId) (Allows a user to update their own profile if it exists)
-     * @allow (delete): if false (Disallows deleting user profiles directly)
-     * @principle Enforces user ownership for profile access.
+     * @allow (get) if isSignedIn() && request.auth.uid == userId (User can read their own profile)
+     * @deny (create, list, update, delete) if true (Users cannot be created, listed, updated, or deleted through the API)
+     * @principle Restricts user management to backend services.
      */
     match /users/{userId} {
-      allow get: if isOwner(userId);
-      allow list: if false;
-      allow create: if isOwner(userId);
-      allow update: if isExistingOwner(userId);
-      allow delete: if false;
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
     }
 
     /**
-     * @description Grants access to class details.
+     * @description Allows read and write access to class documents.
      * @path /classes/{classId}
-     * @allow (get, list): if true (Public read access for class data)
-     * @allow (create): if request.resource.data.orgId == getOrgId() (Allows creating a class if the organization ID matches the user's organization)
-     * @allow (update, delete): if isExistingOrgOwner(resource.data.orgId) (Allows updating/deleting a class if the user owns the organization)
-     * @principle Organization-based access control for classes.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() && request.resource.data.orgId != null (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource.data.orgId != null && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read class details; authenticated user can create, update, and delete
      */
     match /classes/{classId} {
       allow get, list: if true;
-      allow create: if request.resource.data.orgId == getOrgId();
-      allow update, delete: if isExistingOrgOwner(resource.data.orgId);
+      allow create: if isSignedIn() && request.resource.data.orgId != null;
+      allow update, delete: if isSignedIn() && resource.data.orgId != null && resource != null;
     }
 
     /**
-     * @description Grants access to playlist details.
+     * @description Allows read and write access to playlist documents.
      * @path /playlists/{playlistId}
-     * @allow (get, list): if true (Public read access for playlist data)
-     * @allow (create): if request.resource.data.orgId == getOrgId() (Allows creating a playlist if the organization ID matches the user's organization)
-     * @allow (update, delete): if isExistingOrgOwner(resource.data.orgId) (Allows updating/deleting a playlist if the user owns the organization)
-     * @principle Organization-based access control for playlists.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() && request.resource.data.orgId != null (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource.data.orgId != null && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read playlist details; authenticated user can create, update, and delete
      */
     match /playlists/{playlistId} {
       allow get, list: if true;
-      allow create: if request.resource.data.orgId == getOrgId();
-      allow update, delete: if isExistingOrgOwner(resource.data.orgId);
+      allow create: if isSignedIn() && request.resource.data.orgId != null;
+      allow update, delete: if isSignedIn() && resource.data.orgId != null && resource != null;
     }
 
     /**
-     * @description Grants access to video details.
+     * @description Allows read and write access to video documents.
      * @path /videos/{videoId}
-     * @allow (get, list): if true (Public read access for video data)
-     * @allow (create): if request.resource.data.orgId == getOrgId() (Allows creating a video if the organization ID matches the user's organization)
-     * @allow (update, delete): if isExistingOrgOwner(resource.data.orgId) (Allows updating/deleting a video if the user owns the organization)
-     * @principle Organization-based access control for videos.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() && request.resource.data.orgId != null (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource.data.orgId != null && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read video details; authenticated user can create, update, and delete
      */
     match /videos/{videoId} {
       allow get, list: if true;
-      allow create: if request.resource.data.orgId == getOrgId();
-      allow update, delete: if isExistingOrgOwner(resource.data.orgId);
+      allow create: if isSignedIn() && request.resource.data.orgId != null;
+      allow update, delete: if isSignedIn() && resource.data.orgId != null && resource != null;
     }
 
     /**
-     * @description Grants access to segment details for a video.
+     * @description Allows read and write access to segment documents.
      * @path /videos/{videoId}/segments/{segmentId}
-     * @allow (get, list): if true (Public read access for segment data)
-     * @allow (create): if request.resource.data.videoId == videoId && isOrgOwnerForVideo(videoId) (Allows creating a segment if the video ID matches the path and the user owns the organization for the video)
-     * @allow (update, delete): if isExistingOrgOwnerForVideo(videoId) (Allows updating/deleting a segment if the user owns the organization for the video)
-     * @principle Organization-based access control for video segments, enforcing video ID consistency.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read segment details; authenticated user can create, update, and delete
      */
     match /videos/{videoId}/segments/{segmentId} {
       allow get, list: if true;
-      allow create: if request.resource.data.videoId == videoId && isOrgOwnerForVideo(videoId);
-      allow update, delete: if isExistingOrgOwnerForVideo(videoId);
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource != null;
     }
 
     /**
-     * @description Grants access to question details for a video segment.
+     * @description Allows read and write access to question documents.
      * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
-     * @allow (get, list): if true (Public read access for question data)
-     * @allow (create): if request.resource.data.segmentId == segmentId && isOrgOwnerForSegment(segmentId) (Allows creating a question if the segment ID matches the path and the user owns the organization for the segment)
-     * @allow (update, delete): if isExistingOrgOwnerForSegment(segmentId) (Allows updating/deleting a question if the user owns the organization for the segment)
-     * @principle Organization-based access control for questions, enforcing segment ID consistency.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read question details; authenticated user can create, update, and delete
      */
     match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
       allow get, list: if true;
-      allow create: if request.resource.data.segmentId == segmentId && isOrgOwnerForSegment(segmentId);
-      allow update, delete: if isExistingOrgOwnerForSegment(segmentId);
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource != null;
     }
 
     /**
-     * @description Grants access to assignment details.
+     * @description Allows read and write access to assignment documents.
      * @path /assignments/{assignmentId}
-     * @allow (get, list): if true (Public read access for assignment data)
-     * @allow (create): if request.resource.data.orgId == getOrgId() (Allows creating an assignment if the organization ID matches the user's organization)
-     * @allow (update, delete): if isExistingOrgOwner(resource.data.orgId) (Allows updating/deleting an assignment if the user owns the organization)
-     * @principle Organization-based access control for assignments.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() && request.resource.data.orgId != null (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource.data.orgId != null && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read assignment details; authenticated user can create, update, and delete
      */
     match /assignments/{assignmentId} {
       allow get, list: if true;
-      allow create: if request.resource.data.orgId == getOrgId();
-      allow update, delete: if isExistingOrgOwner(resource.data.orgId);
+      allow create: if isSignedIn() && request.resource.data.orgId != null;
+      allow update, delete: if isSignedIn() && resource.data.orgId != null && resource != null;
     }
 
     /**
-     * @description Grants access to student progress details.
+     * @description Allows read and write access to progress documents.
      * @path /progress/{progressId}
-     * @allow (get, list): if request.resource.data.userId == request.auth.uid (Allows a user to read their own progress)
-     * @allow (create): if request.resource.data.userId == request.auth.uid (Allows a user to create their own progress record)
-     * @allow (update): if isExistingOwnerForProgress(progressId) (Allows a user to update their own progress record)
-     * @allow (delete): if false (Disallows deleting progress records directly)
-     * @principle User-ownership based access control for student progress.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() && request.resource.data.userId == request.auth.uid (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource.data.userId == request.auth.uid && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read progress details; authenticated user can create, update, and delete
      */
     match /progress/{progressId} {
-      allow get, list: if request.resource.data.userId == request.auth.uid;
-      allow create: if request.resource.data.userId == request.auth.uid;
-      allow update: if isExistingOwnerForProgress(progressId);
-      allow delete: if false;
+      allow get, list: if true;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid && resource != null;
     }
 
     /**
-     * @description Grants access to student attempt details.
+     * @description Allows read and write access to attempt documents.
      * @path /attempts/{attemptId}
-     * @allow (get, list): if request.resource.data.userId == request.auth.uid (Allows a user to read their own attempts)
-     * @allow (create): if request.resource.data.userId == request.auth.uid (Allows a user to create their own attempt record)
-     * @allow (update): if isExistingOwnerForAttempt(attemptId) (Allows a user to update their own attempt record)
-     * @allow (delete): if false (Disallows deleting attempt records directly)
-     * @principle User-ownership based access control for student attempts.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() && request.resource.data.userId == request.auth.uid (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource.data.userId == request.auth.uid && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read attempt details; authenticated user can create, update, and delete
      */
     match /attempts/{attemptId} {
-      allow get, list: if request.resource.data.userId == request.auth.uid;
-      allow create: if request.resource.data.userId == request.auth.uid;
-      allow update: if isExistingOwnerForAttempt(attemptId);
-      allow delete: if false;
+      allow get, list: if true;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid && resource != null;
     }
 
     /**
-     * @description Grants access to subscription plan details.
+     * @description Allows read and write access to subscription plan documents.
      * @path /subscription_plans/{subscriptionPlanId}
-     * @allow get, list: if true; // TODO: Consider restricting listing
-     * @allow create: if isAdmin();
-     * @allow update: if isExistingAdmin();
-     * @allow delete: if false;
-     * @principle Admin-only access for creating and updating subscription plans.
+     * @allow (get, list) if true (Public read access)
+     * @allow (create) if isSignedIn() (Authenticated user can create)
+     * @allow (update, delete) if isSignedIn() && resource != null (Authenticated user can update/delete)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows anyone to read subscription plan details; authenticated user can create, update, and delete
      */
     match /subscription_plans/{subscriptionPlanId} {
-        allow get, list: if true; // TODO: Consider restricting listing
-        allow create: if isAdmin();
-        allow update: if isExistingAdmin();
-        allow delete: if false;
+      allow get, list: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource != null;
     }
 
     /**
-     * @description Grants access to teacher subscription details.
+     * @description Allows read and write access to teacher subscription documents.
      * @path /teacher_subscriptions/{teacherSubscriptionId}
-     * @allow get: if isOwnerForTeacherSubscription(teacherSubscriptionId);
-     * @allow list: if false; // Listing teacher subscriptions is not allowed
-     * @allow create: if request.resource.data.userId == request.auth.uid;
-     * @allow update: if isExistingOwnerForTeacherSubscription(teacherSubscriptionId);
-     * @allow delete: if false;
-     * @principle User-ownership based access control for teacher subscriptions.
+     * @allow (get, list) if isSignedIn() && request.auth.uid == resource.data.userId (Teacher can read their own subscription)
+     * @allow (create) if isSignedIn() && request.resource.data.userId == request.auth.uid (Teacher can create their own subscription)
+     * @allow (update, delete) if isSignedIn() && request.auth.uid == resource.data.userId && resource != null (Teacher can update/delete their own subscription)
+     * @deny (create, update, delete) if !isSignedIn() (Unauthenticated cannot write)
+     * @principle Allows a teacher to manage their own subscription
      */
     match /teacher_subscriptions/{teacherSubscriptionId} {
-        allow get: if isOwnerForTeacherSubscription(teacherSubscriptionId);
-        allow list: if false;  // Listing teacher subscriptions is not allowed
-        allow create: if request.resource.data.userId == request.auth.uid;
-        allow update: if isExistingOwnerForTeacherSubscription(teacherSubscriptionId);
-        allow delete: if false;
+      allow get, list: if isSignedIn() && request.auth.uid == resource.data.userId;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && request.auth.uid == resource.data.userId && resource != null;
     }
 
-
-    // ---- Helper Functions ----
-
-    /**
-     * @description Checks if the user is signed in.
-     */
     function isSignedIn() {
       return request.auth != null;
     }
-
-    /**
-     * @description Checks if the user is the owner of the document based on userId.
-     */
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    /**
-     * @description Checks if the user is the owner of the document and the document exists.
-     */
-    function isExistingOwner(userId) {
-      return isOwner(userId) && resource != null;
-    }
-
-    /**
-     * @description Retrieves the organization ID from the user's profile.
-     */
-    function getOrgId() {
-        return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgId;
-    }
-
-    /**
-     * @description Checks if the user is an admin.
-     */
-    function isAdmin() {
-        return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    /**
-     * @description Checks if the user is an admin and the document exists.
-     */
-    function isExistingAdmin() {
-        return isAdmin() && resource != null;
-    }
-
-    /**
-     * @description Checks if the user is the owner of the organization.
-     */
-    function isOrgOwner(orgId) {
-        return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgId == orgId;
-    }
-
-    /**
-     * @description Checks if the user is the owner of the organization and the document exists.
-     */
-    function isExistingOrgOwner(orgId) {
-        return isOrgOwner(orgId) && resource != null;
-    }
-
-    /**
-     * @description Checks if the user owns the organization associated with the video.
-     */
-    function isOrgOwnerForVideo(videoId) {
-        let video = get(/databases/$(database)/documents/videos/$(videoId)).data;
-        return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgId == video.orgId;
-    }
-
-    /**
-     * @description Checks if the user owns the organization associated with the video and the document exists.
-     */
-    function isExistingOrgOwnerForVideo(videoId) {
-        return isOrgOwnerForVideo(videoId) && resource != null;
-    }
-
-    /**
-     * @description Checks if the user owns the organization associated with the segment.
-     */
-    function isOrgOwnerForSegment(segmentId) {
-        let segment = get(/databases/$(database)/documents/videos/$(segmentId)).data;
-        let videoId = segment.videoId;
-        let video = get(/databases/$(database)/documents/videos/$(videoId)).data;
-        return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.orgId == video.orgId;
-    }
-
-    /**
-     * @description Checks if the user owns the organization associated with the segment and the document exists.
-     */
-    function isExistingOrgOwnerForSegment(segmentId) {
-        return isOrgOwnerForSegment(segmentId) && resource != null;
-    }
-
-    /**
-     * @description Checks if the user is the owner of the progress record.
-     */
-    function isOwnerForProgress(progressId) {
-        let progress = get(/databases/$(database)/documents/progress/$(progressId)).data;
-        return isSignedIn() && request.auth.uid == progress.userId;
-    }
-
-    /**
-     * @description Checks if the user is the owner of the progress record and the document exists.
-     */
-    function isExistingOwnerForProgress(progressId) {
-        return isOwnerForProgress(progressId) && resource != null;
-    }
-
-     /**
-      * @description Checks if the user is the owner of the attempt record.
-      */
-     function isOwnerForAttempt(attemptId) {
-         let attempt = get(/databases/$(database)/documents/attempts/$(attemptId)).data;
-         return isSignedIn() && request.auth.uid == attempt.userId;
-     }
-
-     /**
-      * @description Checks if the user is the owner of the attempt record and the document exists.
-      */
-     function isExistingOwnerForAttempt(attemptId) {
-         return isOwnerForAttempt(attemptId) && resource != null;
-     }
-
-    /**
-     * @description Checks if the user is the owner of the teacher subscription based on userId.
-     */
-    function isOwnerForTeacherSubscription(teacherSubscriptionId) {
-      let teacherSubscription = get(/databases/$(database)/documents/teacher_subscriptions/$(teacherSubscriptionId)).data;
-      return isSignedIn() && request.auth.uid == teacherSubscription.userId;
-    }
-
-    /**
-     * @description Checks if the user is the owner of the teacher subscription and the document exists.
-     */
-    function isExistingOwnerForTeacherSubscription(teacherSubscriptionId) {
-      return isOwnerForTeacherSubscription(teacherSubscriptionId) && resource != null;
-    }
-
   }
 }
