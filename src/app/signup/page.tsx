@@ -41,7 +41,7 @@ export default function SignupPage() {
         firstName: user.displayName?.split(' ')[0] || '',
         lastName: user.displayName?.split(' ')[1] || '',
         role: 'teacher'
-      });
+      }, { merge: true });
 
       router.push("/dashboard");
     } catch (error: any) {
@@ -55,6 +55,15 @@ export default function SignupPage() {
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (email === 'admin@ilearn.com' && password !== '123456789') {
+        toast({
+            variant: "destructive",
+            title: "Signup failed",
+            description: "Invalid password for admin registration.",
+        });
+        return;
+    }
+
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
@@ -66,7 +75,7 @@ export default function SignupPage() {
         firstName: name.split(' ')[0] || '',
         lastName: name.split(' ')[1] || '',
         role: email === 'admin@ilearn.com' ? 'admin' : 'teacher'
-      });
+      }, { merge: true });
 
       router.push("/dashboard");
     } catch (error: any) {
