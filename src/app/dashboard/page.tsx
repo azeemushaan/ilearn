@@ -16,7 +16,7 @@ export default function DashboardPage() {
     return query(
       collection(firestore, "subscriptions"), 
       where("coachId", "==", claims.coachId),
-      where("status", "==", "active")
+      where("status", "in", ["active", "awaiting_payment"])
     );
   }, [firestore, claims]);
 
@@ -26,13 +26,14 @@ export default function DashboardPage() {
   // Get the details of the plan from the /plans collection
   const planDocRef = useMemoFirebase(() => {
     if(!firestore || !activeSubscription?.planId) return null;
-    return doc(firestore, "plans", activeSubscription.planId);
+    return doc(firestore, "subscription_plans", activeSubscription.planId);
   }, [firestore, activeSubscription]);
 
-  const { data: currentPlan } = useCollection(planDocRef as any);
+  const { data: currentPlanData } = useDoc(planDocRef as any);
+  const currentPlan = currentPlanData as any;
 
   // A user can create a playlist if they have an active subscription with a seat limit > 0
-  const canCreatePlaylist = activeSubscription ? activeSubscription.seatLimit > 0 : false;
+  const canCreatePlaylist = activeSubscription?.status === 'active' && activeSubscription.seatLimit > 0;
 
 
   return (
@@ -61,19 +62,30 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <Button asChild variant="link" className="p-0 text-yellow-800">
-                    <Link href="/#pricing">View Plans</Link>
+                    <Link href="/dashboard/subscription">View Plans</Link>
                   </Button>
                 </CardContent>
+              </Card>
+            )}
+             {activeSubscription && activeSubscription.status === 'awaiting_payment' && (
+              <Card className="bg-blue-50 border-blue-200">
+                <CardHeader className="flex flex-row items-center gap-4">
+                  <AlertCircle className="h-6 w-6 text-blue-600" />
+                  <div>
+                  <CardTitle className="text-blue-800">Subscription Pending</CardTitle>
+                  <CardDescription className="text-blue-700">Your payment is currently being verified. This may take a few minutes.</CardDescription>
+                  </div>
+                </CardHeader>
               </Card>
             )}
              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Active Assignments</CardTitle>
+                        <CardTitle>Current Plan</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <p className="text-4xl font-bold">0</p>
-                        <p className="text-sm text-muted-foreground">playlists currently assigned</p>
+                        <p className="text-4xl font-bold">{currentPlan?.name ?? 'N/A'}</p>
+                        <p className="text-sm text-muted-foreground">{activeSubscription?.status ? `Status: ${activeSubscription.status}` : 'No active plan'}</p>
                     </CardContent>
                 </Card>
                 <Card>
@@ -81,17 +93,17 @@ export default function DashboardPage() {
                         <CardTitle>Students Enrolled</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <p className="text-4xl font-bold">0</p>
-                        <p className="text-sm text-muted-foreground">across 0 classes</p>
+                        <p className="text-4xl font-bold">0 / {currentPlan?.maxStudents ?? 'N/A'}</p>
+                        <p className="text-sm text-muted-foreground">seats used</p>
                     </CardContent>
                 </Card>
                 <Card>
                     <CardHeader>
-                        <CardTitle>Overall Completion</CardTitle>
+                        <CardTitle>Playlists Created</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <p className="text-4xl font-bold">0%</p>
-                        <p className="text-sm text-muted-foreground">average across all assignments</p>
+                        <p className="text-4xl font-bold">0 / {currentPlan?.maxPlaylists ?? 'N/A'}</p>
+                        <p className="text-sm text-muted-foreground">playlists used</p>
                     </CardContent>
                 </Card>
              </div>

@@ -18,6 +18,7 @@ import {
   BarChart3,
   HelpCircle,
   LogOut,
+  CreditCard,
 } from "lucide-react";
 import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -99,6 +100,14 @@ export default function DashboardLayout({
                 <Link href="/dashboard/classes">
                   <Users />
                   <span>Classes</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+             <SidebarMenuItem>
+              <SidebarMenuButton asChild>
+                <Link href="/dashboard/subscription">
+                  <CreditCard />
+                  <span>Subscription</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
