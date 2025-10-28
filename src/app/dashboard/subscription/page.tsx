@@ -38,17 +38,16 @@ const SubscriptionPage = () => {
   const currentSubscription = subscriptions?.[0];
 
   const handleChoosePlan = (plan: any) => {
-    const localClaims = claims; // Capture claims at the time of the click
-    if (!localClaims?.coachId) {
+    if (!claims?.coachId) {
       toast({ variant: "destructive", title: "You must be logged in to subscribe."});
       return;
     }
     
-    const isFree = (plan.priceUSD === 0 && plan.pricePKR === 0) || plan.price === 0;
-    if (!isFree) {
-      setSelectedPlan(plan);
+    const isFree = (plan.priceUSD === 0 && plan.pricePKR === 0);
+    if (isFree) {
+        subscribeToPlan(plan, "free", "");
     } else {
-      subscribeToPlan(plan, "free", "", localClaims);
+        setSelectedPlan(plan);
     }
   };
 
@@ -62,36 +61,38 @@ const SubscriptionPage = () => {
       return;
     }
     setIsSubmitting(true);
-    await subscribeToPlan(selectedPlan, "manual_bank_transfer", transactionId, claims);
+    await subscribeToPlan(selectedPlan, "manual_bank_transfer", transactionId);
     setSelectedPlan(null);
     setTransactionId("");
     setIsSubmitting(false);
   };
 
-  const subscribeToPlan = async (plan: any, method: string, reference: string, currentClaims: any) => {
-    if (!currentClaims?.coachId || !firestore) {
-        toast({ variant: "destructive", title: "You must be logged in to subscribe."});
+  const subscribeToPlan = async (plan: any, method: string, reference: string) => {
+    if (!claims?.coachId || !firestore) {
+        toast({ variant: "destructive", title: "Authentication error. Please refresh and try again."});
         return;
     }
     
     if (currentSubscription) {
         toast({
             title: "Existing Subscription Found",
-            description: "You already have an active or pending subscription. Please wait for it to be processed before changing plans.",
+            description: "You already have an active or pending subscription. Please manage it before subscribing to a new one.",
         });
         return;
     }
 
     try {
-      const coachId = currentClaims.coachId;
+      const coachId = claims.coachId;
       const amount = plan.currency === 'USD' ? plan.priceUSD : plan.pricePKR;
+      const isFree = method === 'free';
 
+      // Create a payment record
       await addDoc(collection(firestore, 'payments'), {
         coachId: coachId,
         amount: amount,
         currency: plan.currency,
         method: method,
-        status: method === 'free' ? 'approved' : 'pending',
+        status: isFree ? 'approved' : 'pending',
         reference: reference,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -99,21 +100,23 @@ const SubscriptionPage = () => {
         planTitle: plan.name,
       });
       
+      // Create the subscription record
       await addDoc(collection(firestore, 'subscriptions'), {
           coachId: coachId,
           planId: plan.id,
           tier: plan.tier,
           seatLimit: plan.maxStudents,
-          status: method === 'free' ? 'active' : 'awaiting_payment',
+          status: isFree ? 'active' : 'awaiting_payment',
           currentPeriodEnd: null,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
       });
       
-      if (method !== 'free') {
+      if (!isFree) {
         toast({
             title: "Submission Successful!",
             description: "Your payment is pending verification. This may take up to 5 minutes.",
+            variant: 'default', // Using default for green-ish tint or neutral look
         });
       } else {
          toast({
@@ -121,8 +124,9 @@ const SubscriptionPage = () => {
             description: `You have subscribed to the ${plan.name} plan.`,
         });
       }
-      // Re-route to dashboard to see updated status
+      
       router.push('/dashboard');
+
     } catch (error: any) {
       console.error("Error subscribing to plan:", error);
       toast({
@@ -144,14 +148,9 @@ const SubscriptionPage = () => {
     if (!plan) return '';
     
     // Check for new schema with specific currency prices first
-    if (plan.currency === 'USD') {
-        if (plan.priceUSD === 0) return 'Free';
-        return `$${plan.priceUSD}`;
-    }
-    if (plan.currency === 'PKR') {
-        if (plan.pricePKR === 0) return 'Free';
-        return `Rs${plan.pricePKR}`;
-    }
+    if (plan.priceUSD === 0 && plan.pricePKR === 0) return 'Free';
+    if (plan.currency === 'USD') return `$${plan.priceUSD}`;
+    if (plan.currency === 'PKR') return `Rs${plan.pricePKR}`;
     
     // Fallback for old schema or undefined currency
     if (plan.price === 0) return 'Free';
@@ -183,7 +182,7 @@ const SubscriptionPage = () => {
                 <CardTitle className="text-2xl font-headline">{plan.name}</CardTitle>
                 <div className="flex items-baseline gap-2">
                     <span className="text-4xl font-bold">{getPriceDisplay(plan)}</span>
-                    {!(plan.priceUSD === 0 && plan.pricePKR === 0) && !(plan.price === 0) && <span className="text-muted-foreground">/ month</span>}
+                    {!(plan.priceUSD === 0 && plan.pricePKR === 0) && <span className="text-muted-foreground">/ month</span>}
                 </div>
                 <CardDescription>{plan.description}</CardDescription>
               </CardHeader>
