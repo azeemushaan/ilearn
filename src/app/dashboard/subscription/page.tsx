@@ -38,11 +38,17 @@ const SubscriptionPage = () => {
   const currentSubscription = subscriptions?.[0];
 
   const handleChoosePlan = (plan: any) => {
+    const localClaims = claims; // Capture claims at the time of the click
+    if (!localClaims?.coachId) {
+      toast({ variant: "destructive", title: "You must be logged in to subscribe."});
+      return;
+    }
+    
     const isFree = (plan.priceUSD === 0 && plan.pricePKR === 0) || plan.price === 0;
     if (!isFree) {
       setSelectedPlan(plan);
     } else {
-      subscribeToPlan(plan, "free", "");
+      subscribeToPlan(plan, "free", "", localClaims);
     }
   };
 
@@ -56,14 +62,14 @@ const SubscriptionPage = () => {
       return;
     }
     setIsSubmitting(true);
-    await subscribeToPlan(selectedPlan, "manual_bank_transfer", transactionId);
+    await subscribeToPlan(selectedPlan, "manual_bank_transfer", transactionId, claims);
     setSelectedPlan(null);
     setTransactionId("");
     setIsSubmitting(false);
   };
 
-  const subscribeToPlan = async (plan: any, method: string, reference: string) => {
-    if (!claims?.coachId || !firestore) {
+  const subscribeToPlan = async (plan: any, method: string, reference: string, currentClaims: any) => {
+    if (!currentClaims?.coachId || !firestore) {
         toast({ variant: "destructive", title: "You must be logged in to subscribe."});
         return;
     }
@@ -77,7 +83,7 @@ const SubscriptionPage = () => {
     }
 
     try {
-      const coachId = claims.coachId;
+      const coachId = currentClaims.coachId;
       const amount = plan.currency === 'USD' ? plan.priceUSD : plan.pricePKR;
 
       await addDoc(collection(firestore, 'payments'), {
