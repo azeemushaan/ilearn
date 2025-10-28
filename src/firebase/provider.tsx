@@ -1,11 +1,12 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, onIdTokenChanged, getIdTokenResult, User, Auth } from 'firebase/auth';
 import { auth as clientAuth } from './client';
 import { FirebaseApp } from 'firebase/app';
-import { Firestore } from 'firebase/firestore';
+import { getFirestore, Firestore } from 'firebase/firestore';
 import { FirebaseErrorListener } from '@/components/FirebaseErrorListener';
+import { initializeFirebase } from '.';
 
 type Claims = Record<string, any> | null;
 
@@ -19,7 +20,7 @@ type AuthCtx = {
 
 const FirebaseAuthContext = createContext<AuthCtx | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [claims, setClaims] = useState<Claims>(null);
   const [initializing, setInitializing] = useState(true);
@@ -29,9 +30,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsub = onAuthStateChanged(clientAuth, (u) => {
       setUser(u);
-      setClaims(null);
-      setLoadingClaims(!!u);
-      setInitializing(false);
+      setClaims(null); // Reset claims when user changes
+      setLoadingClaims(!!u); // Start loading claims if user exists
+      setInitializing(false); // Initial auth check is done
     });
     return () => unsub();
   }, []);
@@ -46,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setLoadingClaims(true);
       try {
-        const res = await getIdTokenResult(u, false); // no force by default
+        const res = await getIdTokenResult(u, false); // false = don't force refresh
         setClaims(res.claims || {});
       } finally {
         setLoadingClaims(false);
@@ -60,7 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!clientAuth.currentUser) return;
     setLoadingClaims(true);
     try {
-      const res = await getIdTokenResult(clientAuth.currentUser, true); // FORCE refresh
+      const res = await getIdTokenResult(clientAuth.currentUser, true); // true = FORCE refresh
       setClaims(res.claims || {});
     } finally {
       setLoadingClaims(false);
@@ -70,29 +71,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AuthCtx>(() => ({
     user, claims, initializing, loadingClaims, refreshClaims,
   }), [user, claims, initializing, loadingClaims]);
+  
+  const firebaseServices = useMemo(() => {
+    // This is safe to run on client, it's idempotent
+    return initializeFirebase();
+  }, []);
+
+
+  const legacyContextValue = useMemo(
+    () => ({
+      firebaseApp: firebaseServices.firebaseApp,
+      firestore: firebaseServices.firestore,
+      auth: firebaseServices.auth,
+      user,
+      isLoading: initializing || loadingClaims,
+    }),
+    [firebaseServices, user, initializing, loadingClaims]
+  );
+
 
   return (
     <FirebaseAuthContext.Provider value={value}>
-      {children}
+        <LegacyFirebaseContext.Provider value={legacyContextValue}>
+            <FirebaseErrorListener />
+            {children}
+        </LegacyFirebaseContext.Provider>
     </FirebaseAuthContext.Provider>
   );
 }
 
 export function useFirebaseAuth() {
   const ctx = useContext(FirebaseAuthContext);
-  if (!ctx) throw new Error('useFirebaseAuth must be used within <AuthProvider>');
+  if (!ctx) throw new Error('useFirebaseAuth must be used within <FirebaseProvider>');
   return ctx;
 }
 
 
 // --- Legacy Provider for backwards compatibility ---
-
-interface FirebaseProviderProps {
-  children: React.ReactNode;
-  firebaseApp: FirebaseApp | null;
-  firestore: Firestore | null;
-  auth: Auth | null;
-}
 
 export interface FirebaseContextState {
   firebaseApp: FirebaseApp | null;
@@ -102,37 +117,11 @@ export interface FirebaseContextState {
   isLoading: boolean;
 }
 
-export const FirebaseContext = createContext<FirebaseContextState | undefined>(undefined);
+export const LegacyFirebaseContext = createContext<FirebaseContextState | undefined>(undefined);
 
-export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
-  children,
-  firebaseApp,
-  firestore,
-  auth,
-}) => {
-  const { user, initializing, loadingClaims } = useFirebaseAuth();
-
-  const contextValue = useMemo(
-    (): FirebaseContextState => ({
-      firebaseApp,
-      firestore,
-      auth,
-      user,
-      isLoading: initializing || loadingClaims,
-    }),
-    [firebaseApp, firestore, auth, user, initializing, loadingClaims]
-  );
-
-  return (
-    <FirebaseContext.Provider value={contextValue}>
-      <FirebaseErrorListener />
-      {children}
-    </FirebaseContext.Provider>
-  );
-};
 
 function useFirebaseContext() {
-  const context = useContext(FirebaseContext);
+  const context = useContext(LegacyFirebaseContext);
   if (context === undefined) {
     throw new Error('useFirebaseContext must be used within a FirebaseProvider.');
   }

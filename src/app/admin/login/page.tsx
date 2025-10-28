@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/firebase/client';
+import { useFirebaseAuth } from '@/firebase/provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,6 +13,7 @@ export default function AdminLoginPage() {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { refreshClaims } = useFirebaseAuth();
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -24,8 +26,9 @@ export default function AdminLoginPage() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      // After login, redirect to the dashboard.
-      // The AdminLayout will handle checking claims and protecting the route.
+      // Force a refresh of the token to get latest claims
+      await refreshClaims();
+      // Redirect to the main admin dashboard page, the layout will handle the rest.
       router.replace('/admin/dashboard');
     } catch (err: any) {
       setError(err.message || 'An unknown error occurred.');
