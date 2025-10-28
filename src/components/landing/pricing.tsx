@@ -58,12 +58,24 @@ const Pricing = () => {
   );
 
   const getPriceDisplay = (plan: any) => {
-    const isFree = plan.priceUSD === 0 && plan.pricePKR === 0;
-    if (isFree) return 'Free';
+    if (!plan) return '';
     
-    const price = plan.currency === 'USD' ? plan.priceUSD : plan.pricePKR;
-    const symbol = plan.currency === 'USD' ? '$' : 'Rs';
-    return `${symbol}${price}`;
+    // Check for new schema with specific currency prices first
+    if (plan.currency === 'USD') {
+        if (plan.priceUSD === 0) return 'Free';
+        return `$${plan.priceUSD}`;
+    }
+    if (plan.currency === 'PKR') {
+        if (plan.pricePKR === 0) return 'Free';
+        return `Rs${plan.pricePKR}`;
+    }
+    
+    // Fallback for old schema or undefined currency
+    if (plan.price === 0) return 'Free';
+    if (plan.price) return `$${plan.price}`;
+
+    // Default case if no price is found
+    return 'Free';
   }
 
   return (
