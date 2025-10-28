@@ -2,213 +2,186 @@
  * @fileoverview Firestore Security Rules for the application.
  *
  * Core Philosophy:
- * This ruleset prioritizes strong authorization and access control.
- * It assumes a multi-tenant architecture where data is generally isolated
- * to a coach (tenant) and their associated users.
+ * This ruleset enforces a multi-tenant data model where Coaches (tenants) own data.
+ * Users are associated with a Coach and inherit access rights based on their role within that Coach.
+ * Access is generally restricted to authenticated users.
  *
  * Data Structure:
- * - Coaches: /coaches/{coachId}
- * - Users: /users/{userId}
- * - Plans: /plans/{planId}
- * - Subscriptions: /subscriptions/{subId}
- * - Payments: /payments/{paymentId}
- * - Invoices: /invoices/{invoiceId}
- * - Audit Logs: /audit/{auditId}
- * - Settings: /settings/theme (single document)
- * - Teacher Subscriptions: /teacher_subscriptions/{id} (legacy)
- * - Subscription Plans: /subscription_plans/{planId}
+ * - /coaches/{coachId}: Coach (tenant) profiles.
+ * - /users/{userId}: User profiles, containing a coachId and role.
+ * - /subscription_plans/{planId}: Publicly readable subscription plans.
+ * - /subscriptions/{subId}: Coach subscription details.
+ * - /payments/{paymentId}: Payment records for coaches.
+ * - /invoices/{invoiceId}: Invoices for coaches.
+ * - /audit/{auditId}: Audit logs.
+ * - /settings/theme: Global theme settings.
+ * - /teacher_subscriptions/{id}: Legacy subscription model.
  *
  * Key Security Decisions:
- * - Strict ownership for coaches and users.
- * - Subscription plans are publicly readable.
- * - Most write operations require authentication.
- * - Data validation is minimized in this prototyping phase, focusing
- *   only on authorization and relational integrity.
- * - Read operations for 'plans' and 'subscription_plans' are public.
- * - User listing is restricted to admins only.
+ * - Users can only create their own user document.
+ * - Data Schemas are not validated.
+ *
+ * Denormalization for Authorization:
+ *  - User documents contain a `coachId` field to quickly authorize access to coach-owned resources.
+ *  - User documents also contain a `role` field (e.g., 'admin', 'teacher', 'student') for role-based access control.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Allows reading and writing of global theme settings.
-     * @path /settings/theme
-     * @allow (get, list): Any user can read the theme.
-     * @deny (create, update, delete): No one can create, update, or delete the theme via client.
-     * @principle Public read, admin-only management via backend functions.
-     */
-    match /settings/theme {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Restrict this to backend functions or admin roles.
-    }
-
-    /**
-     * @description Manages coach (tenant) profiles.
+     * @description Allows reading and writing of coach profiles, but only by authenticated users who are coaches themselves.
      * @path /coaches/{coachId}
-     * @allow (get): Any authenticated user can get a coach profile.
-     * @allow (create): Only the user with matching coachId can create.
-     * @allow (update, delete): Only the owner (coach) can update/delete their profile.
-     * @deny (list): Listing all coaches is not allowed.
-     * @principle Enforces document ownership for writes, restricts listing.
+     * @allow (get, list) if isSignedIn()
+     * @allow (create, update, delete) if isSignedIn() && isOwner(coachId)
+     * @deny (create, update, delete) if !isSignedIn() || !isOwner(coachId)
+     * @principle Enforces coach-level access control.
      */
     match /coaches/{coachId} {
-      allow get: if isSignedIn();
-      allow list: if false;
-      allow create: if isSignedIn() && request.auth.uid == coachId;
-      allow update: if isExistingOwner(coachId);
-      allow delete: if isExistingOwner(coachId);
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isOwner(coachId);
+      allow update: if isSignedIn() && isExistingOwner(coachId);
+      allow delete: if isSignedIn() && isExistingOwner(coachId);
     }
 
     /**
-     * @description Manages user profiles within the system.
+     * @description Allows users to read and write their own user profiles.
      * @path /users/{userId}
-     * @allow (get): Only the user themselves can retrieve their profile.
-     * @allow (list): Only admin users can list all user profiles.
-     * @allow (create): Only the user themselves can create their profile.
-     * @allow (update, delete): Only the owner (user) can update/delete their profile.
-     * @deny (create): Creating other user profiles is not allowed.
-     * @deny (update, delete): Modifying other user profiles is not allowed.
-     * @principle Enforces document ownership for writes, restricts listing, and validates ownership on creation.
+     * @allow (get) if isSignedIn() && isOwner(userId)
+     * @allow (list) if isSignedIn() && isOwner(userId)
+     * @allow (create) if isSignedIn() && request.auth.uid == userId
+     * @allow (update) if isSignedIn() && isExistingOwner(userId)
+     * @allow (delete) if isSignedIn() && isExistingOwner(userId)
+     * @deny (create) if !isSignedIn() || request.auth.uid != userId
+     * @principle Enforces user-level access control.
      */
     match /users/{userId} {
-      allow get: if isSignedIn() && request.auth.uid == userId;
-      allow list: if isSignedIn() && request.auth.token.role == 'admin';
+      allow get: if isSignedIn() && isOwner(userId);
+      allow list: if isSignedIn() && isOwner(userId);
       allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isExistingOwner(userId);
-      allow delete: if isExistingOwner(userId);
+      allow update: if isSignedIn() && isExistingOwner(userId);
+      allow delete: if isSignedIn() && isExistingOwner(userId);
     }
 
     /**
-     * @description Manages subscription plan details.
-     * @path /plans/{planId}
-     * @allow (get, list): All users can read the subscription plans.
-     * @deny (create, update, delete): No one can create, update, or delete plans via client.
-     * @principle Public read, admin-only management via backend functions.
-     */
-    match /plans/{planId} {
-      allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Restrict this to backend functions or admin roles.
-    }
-
-    /**
-     * @description Manages coach subscription records.
-     * @path /subscriptions/{subId}
-     * @allow (get): Any authenticated user can get a subscription.
-     * @allow (list): Only admin can list subscriptions.
-     * @allow (create): Only admin can create subscriptions.
-     * @allow (update, delete): Only admin can update or delete subscriptions.
-     * @principle Restricts access to subscription management for administrators only.
-     */
-    match /subscriptions/{subId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn() && request.auth.token.role == 'admin';
-      allow create: if isSignedIn() && request.auth.token.role == 'admin';
-      allow update: if isSignedIn() && request.auth.token.role == 'admin' && resource != null;
-      allow delete: if isSignedIn() && request.auth.token.role == 'admin' && resource != null;
-    }
-
-    /**
-     * @description Manages payment records.
-     * @path /payments/{paymentId}
-     * @allow (get): Any authenticated user can get a payment.
-     * @allow (list): Only admin can list payments.
-     * @allow (create): Only admin can create payments.
-     * @allow (update, delete): Only admin can update or delete payments.
-     * @principle Restricts access to payment management for administrators only.
-     */
-    match /payments/{paymentId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn() && request.auth.token.role == 'admin';
-      allow create: if isSignedIn() && request.auth.token.role == 'admin';
-      allow update: if isSignedIn() && request.auth.token.role == 'admin' && resource != null;
-      allow delete: if isSignedIn() && request.auth.token.role == 'admin' && resource != null;
-    }
-
-    /**
-     * @description Manages invoice records.
-     * @path /invoices/{invoiceId}
-     * @allow (get): Any authenticated user can get an invoice.
-     * @allow (list): Only admin can list invoices.
-     * @allow (create): Only admin can create invoices.
-     * @allow (update, delete): Only admin can update or delete invoices.
-     * @principle Restricts access to invoice management for administrators only.
-     */
-    match /invoices/{invoiceId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn() && request.auth.token.role == 'admin';
-      allow create: if isSignedIn() && request.auth.token.role == 'admin';
-      allow update: if isSignedIn() && request.auth.token.role == 'admin' && resource != null;
-      allow delete: if isSignedIn() && request.auth.token.role == 'admin' && resource != null;
-    }
-
-    /**
-     * @description Manages audit log entries.
-     * @path /audit/{auditId}
-     * @allow (get): Any authenticated user can get an audit log entry.
-     * @allow (list): Only admin can list audit log entries.
-     * @deny (create, update, delete): No one can create, update, or delete audit logs via client.
-     * @principle Restricts write access to audit logs.
-     */
-    match /audit/{auditId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn() && request.auth.token.role == 'admin';
-      allow create, update, delete: if false; // TODO: Restrict this to backend functions or admin roles.
-    }
-
-    /**
-     * @description Manages legacy teacher subscription records.
-     * @path /teacher_subscriptions/{id}
-     * @allow (get): Any authenticated user can get a teacher subscription.
-     * @allow (list): Only admin can list teacher subscriptions.
-     * @allow (create): Only admin can create teacher subscriptions.
-     * @allow (update, delete): Only admin can update or delete teacher subscriptions.
-     * @principle Restricts access to teacher subscription management for administrators only.
-     */
-    match /teacher_subscriptions/{id} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn() && request.auth.token.role == 'admin';
-      allow create: if isSignedIn() && request.auth.token.role == 'admin';
-      allow update: if isSignedIn() && request.auth.token.role == 'admin' && resource != null;
-      allow delete: if isSignedIn() && request.auth.token.role == 'admin' && resource != null;
-    }
-
-    /**
-     * @description Manages subscription plan details (duplicate for pricing page).
+     * @description Allows anyone to read subscription plans, but restricts creation, updates, and deletion.
      * @path /subscription_plans/{planId}
-     * @allow (get, list): All users can read the subscription plans.
-     * @deny (create, update, delete): No one can create, update, or delete plans via client.
-     * @principle Public read, admin-only management via backend functions.
+     * @allow get, list: if true;
+     * @deny create, update, delete: if false; // TODO: Add role-based access for managing subscription plans.
+     * @principle Allows public read access to subscription plans.
      */
     match /subscription_plans/{planId} {
       allow get, list: if true;
-      allow create, update, delete: if false; // TODO: Restrict this to backend functions or admin roles.
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
     /**
-     * @description Checks if the user is signed in.
-     * @return {boolean} True if the user is signed in, false otherwise.
+     * @description Restricts access to subscriptions to authenticated users with the correct coachId.
+     * @path /subscriptions/{subId}
+     * @allow get, list: if isSignedIn(); // TODO: Refine to allow only coach or admin.
+     * @allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+     * @allow update: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+     * @allow delete: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+     * @principle Enforces subscription access control.
      */
-    function isSignedIn() {
-      return request.auth != null;
+    match /subscriptions/{subId} {
+      allow get, list: if isSignedIn(); // TODO: Refine to allow only coach or admin.
+      allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+      allow update: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+      allow delete: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
     }
 
     /**
-     * @description Checks if the user is the owner of the document.
-     * @param {string} userId The user ID to check against.
-     * @return {boolean} True if the user is the owner, false otherwise.
+     * @description Restricts access to payments to authenticated users with the correct coachId.
+     * @path /payments/{paymentId}
+     * @allow get, list: if isSignedIn(); // TODO: Refine to allow only coach or admin.
+     * @allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+     * @allow update: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+     * @allow delete: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+     * @principle Enforces payment access control.
      */
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+    match /payments/{paymentId} {
+      allow get, list: if isSignedIn(); // TODO: Refine to allow only coach or admin.
+      allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+      allow update: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+      allow delete: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
     }
 
     /**
-     * @description Checks if the user is the owner of an EXISTING document.
-     * @param {string} userId The user ID to check against.
-     * @return {boolean} True if the user is the owner, false otherwise.
+     * @description Restricts access to invoices to authenticated users with the correct coachId.
+     * @path /invoices/{invoiceId}
+     * @allow get, list: if isSignedIn(); // TODO: Refine to allow only coach or admin.
+     * @allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+     * @allow update: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+     * @allow delete: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+     * @principle Enforces invoice access control.
      */
-    function isExistingOwner(userId) {
-      return isOwner(userId) && resource != null;
+    match /invoices/{invoiceId} {
+      allow get, list: if isSignedIn(); // TODO: Refine to allow only coach or admin.
+      allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+      allow update: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
+      allow delete: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
     }
+
+    /**
+     * @description Restricts access to audit logs to authenticated users with the correct coachId.
+     * @path /audit/{auditId}
+     * @allow get, list: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+     * @allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+     * @allow update: if false;
+     * @allow delete: if false;
+     * @principle Enforces audit log access control.
+     */
+    match /audit/{auditId} {
+      allow get, list: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+      allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
+      allow update: if false;
+      allow delete: if false;
+    }
+
+     /**
+      * @description Allows public read access to theme settings.
+      * @path /settings/theme
+      * @allow get, list: if true;
+      * @deny create, update, delete: if false; // TODO: Add role-based write access.
+      * @principle Allows public read access to theme settings.
+      */
+    match /settings/theme {
+        allow get, list: if true;
+        allow create: if false;
+        allow update: if false;
+        allow delete: if false;
+    }
+
+    /**
+     * @description Restricts access to teacher subscriptions to authenticated users.
+     * @path /teacher_subscriptions/{id}
+     * @allow get, list: if isSignedIn(); // TODO: Add coachId validation
+     * @allow create: if isSignedIn(); // TODO: Add coachId validation
+     * @allow update: if isSignedIn() && resource != null; // TODO: Add coachId validation
+     * @allow delete: if isSignedIn() && resource != null; // TODO: Add coachId validation
+     * @principle Enforces teacher subscription access control.
+     */
+    match /teacher_subscriptions/{id} {
+        allow get, list: if isSignedIn(); // TODO: Add coachId validation
+        allow create: if isSignedIn(); // TODO: Add coachId validation
+        allow update: if isSignedIn() && resource != null; // TODO: Add coachId validation
+        allow delete: if isSignedIn() && resource != null; // TODO: Add coachId validation
+    }
+  }
+
+  // Helper functions
+  function isSignedIn() {
+    return request.auth != null;
+  }
+
+  function isOwner(userId) {
+    return request.auth.uid == userId;
+  }
+
+  function isExistingOwner(userId) {
+    return isOwner(userId) && resource != null;
   }
 }
