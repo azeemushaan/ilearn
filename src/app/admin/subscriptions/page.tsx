@@ -25,8 +25,8 @@ import { Badge } from "@/components/ui/badge";
 
 const planSchema = z.object({
   title: z.string().min(1, "Plan name is required"),
-  features: z.string().min(1, "Description is required"),
-  pricePKR: z.preprocess((a) => parseFloat(z.string().parse(a)), z.number().min(0)),
+  description: z.string().min(1, "Description is required"),
+  price: z.preprocess((a) => parseFloat(z.string().parse(a)), z.number().min(0)),
   seatLimit: z.preprocess((a) => parseInt(z.string().parse(a), 10), z.number().int().min(0)),
   tier: z.enum(["free", "pro", "enterprise"]),
   sort: z.preprocess((a) => parseInt(z.string().parse(a), 10), z.number().int()),
@@ -50,8 +50,8 @@ export default function PlansPage() {
     resolver: zodResolver(planSchema),
     defaultValues: {
         title: "",
-        features: "",
-        pricePKR: 0,
+        description: "",
+        price: 0,
         seatLimit: 1,
         tier: "free",
         sort: 1,
@@ -63,6 +63,7 @@ export default function PlansPage() {
     if (!firestore) return;
     try {
       await addDoc(collection(firestore, "subscription_plans"), {
+        name: data.title, // Use name for consistency with pricing page
         ...data,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -109,14 +110,14 @@ export default function PlansPage() {
                     {errors.title && <p className="col-span-4 text-red-500 text-sm text-right">{errors.title.message}</p>}
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="features" className="text-right">Features</Label>
-                    <Input id="features" {...register("features")} className="col-span-3" placeholder="One feature per line" />
-                     {errors.features && <p className="col-span-4 text-red-500 text-sm text-right">{errors.features.message}</p>}
+                    <Label htmlFor="description" className="text-right">Description</Label>
+                    <Input id="description" {...register("description")} className="col-span-3" placeholder="Feature list (one per line)" />
+                     {errors.description && <p className="col-span-4 text-red-500 text-sm text-right">{errors.description.message}</p>}
                   </div>
                    <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="pricePKR" className="text-right">Price (PKR)</Label>
-                    <Input id="pricePKR" type="number" {...register("pricePKR")} className="col-span-3" />
-                     {errors.pricePKR && <p className="col-span-4 text-red-500 text-sm text-right">{errors.pricePKR.message}</p>}
+                    <Label htmlFor="price" className="text-right">Price (PKR)</Label>
+                    <Input id="price" type="number" {...register("price")} className="col-span-3" />
+                     {errors.price && <p className="col-span-4 text-red-500 text-sm text-right">{errors.price.message}</p>}
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
                     <Label htmlFor="seatLimit" className="text-right">Seat Limit</Label>
@@ -170,17 +171,17 @@ export default function PlansPage() {
                 <Card key={plan.id}>
                   <CardHeader>
                     <CardTitle className="flex justify-between items-center">
-                        {plan.title}
-                        <Badge variant={plan.pricePKR === 0 ? "secondary" : "default"}>
-                            {plan.pricePKR === 0 ? 'Free' : `Rs ${plan.pricePKR}`}
+                        {plan.name || plan.title}
+                        <Badge variant={plan.price === 0 ? "secondary" : "default"}>
+                            {plan.price === 0 ? 'Free' : `Rs ${plan.price}`}
                         </Badge>
                     </CardTitle>
-                     <CardDescription>{(plan.features || "").split('\n')[0]}</CardDescription>
+                     <CardDescription>{(plan.description || "").split('\n')[0]}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                      <ul className="list-disc list-inside text-muted-foreground text-sm space-y-1">
                         <li>{plan.seatLimit} Teacher Seat(s)</li>
-                       {(plan.features || "").split('\n').slice(1).map((feature: string, index: number) => (
+                       {(plan.description || "").split('\n').slice(1).map((feature: string, index: number) => (
                            <li key={index}>{feature}</li>
                        ))}
                     </ul>

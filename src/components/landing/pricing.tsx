@@ -4,16 +4,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { collection, addDoc, serverTimestamp, getDocs, query, where, getFirestore } from "firebase/firestore";
-import { initializeApp, getApps } from "firebase/app";
-import { firebaseConfig } from "@/firebase/config";
-import { useAuth } from "@/firebase";
+import { collection, addDoc, serverTimestamp, getDocs, query, where } from "firebase/firestore";
+import { useAuth, useFirestore } from "@/firebase";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getApps, initializeApp } from "firebase/app";
+import { getFirestore } from "firebase/firestore";
+import { firebaseConfig } from "@/firebase/config";
+
 
 const Pricing = () => {
   const { user } = useAuth();
@@ -62,7 +64,7 @@ const Pricing = () => {
       router.push('/signup');
       return;
     }
-    if (plan.pricePKR > 0) {
+    if (plan.price > 0) {
       setSelectedPlan(plan);
     } else {
       subscribeToPlan(plan, "free", "");
@@ -113,7 +115,7 @@ const Pricing = () => {
 
       await addDoc(collection(db, 'payments'), {
         coachId: coachId,
-        amount: plan.pricePKR,
+        amount: plan.price,
         currency: 'PKR',
         method: method,
         status: method === 'free' ? 'approved' : 'pending',
@@ -178,20 +180,20 @@ const Pricing = () => {
                 {plan.tier === "pro" && (
                     <div className="text-sm font-semibold text-accent -mt-2 mb-2">MOST POPULAR</div>
                 )}
-                <CardTitle className="text-2xl font-headline">{plan.title}</CardTitle>
+                <CardTitle className="text-2xl font-headline">{plan.name || plan.title}</CardTitle>
                 <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-bold">{plan.pricePKR === 0 ? 'Free' : `Rs ${plan.pricePKR}`}</span>
+                    <span className="text-4xl font-bold">{plan.price === 0 ? 'Free' : `Rs ${plan.price}`}</span>
                     <span className="text-muted-foreground">/ month</span>
                 </div>
-                <CardDescription>{(plan.features || "").split('\n')[0]}</CardDescription>
+                <CardDescription>{(plan.description || "").split('\n')[0]}</CardDescription>
               </CardHeader>
               <CardContent className="flex-1">
                 <ul className="space-y-3">
                   <li className="flex items-start">
                     <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <span className="text-muted-foreground">{plan.seatLimit} Teacher Seats</span>
+                    <span className="text-muted-foreground">{plan.maxStudents || plan.seatLimit} Teacher Seats</span>
                   </li>
-                  {(plan.features || "").split('\n').slice(1).filter((f: string) => f.trim() !== '').map((feature: string, index: number) => (
+                  {(plan.description || "").split('\n').slice(1).filter((f: string) => f.trim() !== '').map((feature: string, index: number) => (
                        <li key={index} className="flex items-start">
                            <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
                            <span className="text-muted-foreground">{feature.trim()}</span>
@@ -216,7 +218,7 @@ const Pricing = () => {
                 <DialogHeader>
                     <DialogTitle>Manual Bank Transfer</DialogTitle>
                     <DialogDescription>
-                        To subscribe to the {selectedPlan?.title} plan, please transfer Rs {selectedPlan?.pricePKR} to the following account:
+                        To subscribe to the {selectedPlan?.name || selectedPlan?.title} plan, please transfer Rs {selectedPlan?.price} to the following account:
                     </DialogDescription>
                 </DialogHeader>
                 <div className="py-4 space-y-4">
