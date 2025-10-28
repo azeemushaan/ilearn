@@ -44,19 +44,28 @@ export default function AdminLayout({
   const [isLoadingClaims, setIsLoadingClaims] = useState(true);
 
   useEffect(() => {
+    console.log('[AdminLayout] useEffect triggered.', { isUserLoading });
+
     if (isUserLoading) {
+      console.log('[AdminLayout] User is loading. Waiting...');
       return; // Wait until user object is resolved
     }
 
     if (!user) {
+      console.log('[AdminLayout] No user found. Redirecting to /admin/login.');
       router.push("/admin/login");
       return;
     }
 
-    user.getIdTokenResult(true) // Force refresh to get latest claims
+    console.log('[AdminLayout] User found:', user.uid, 'Requesting claims...');
+    // Force refresh to get latest claims
+    user.getIdTokenResult(true) 
       .then((idTokenResult) => {
+        console.log('[AdminLayout] Claims received:', idTokenResult.claims);
         setClaims(idTokenResult.claims);
+        
         if (idTokenResult.claims.role !== 'admin') {
+          console.error('[AdminLayout] Access Denied. User role is not admin:', idTokenResult.claims.role);
           toast({
             variant: 'destructive',
             title: 'Access Denied',
@@ -65,10 +74,12 @@ export default function AdminLayout({
           // Sign out and redirect to a non-admin login to prevent loops
           auth?.signOut();
           router.push('/login');
+        } else {
+           console.log('[AdminLayout] Admin access GRANTED.');
         }
       })
       .catch((error) => {
-        console.error("Error getting user claims:", error);
+        console.error("[AdminLayout] Error getting user claims:", error);
         toast({
           variant: 'destructive',
           title: 'Authentication Error',
@@ -78,6 +89,7 @@ export default function AdminLayout({
         router.push('/login');
       })
       .finally(() => {
+        console.log('[AdminLayout] Finished claims check. Setting isLoadingClaims to false.');
         setIsLoadingClaims(false);
       });
 
@@ -90,14 +102,18 @@ export default function AdminLayout({
     router.push('/admin/login');
   };
 
+  const isLoading = isUserLoading || isLoadingClaims;
+
+  console.log('[AdminLayout] Render state:', { isUserLoading, isLoadingClaims, finalIsLoading: isLoading, claimsExist: !!claims });
+
   // Show loading screen while user is loading or claims are being verified
-  if (isUserLoading || isLoadingClaims || !claims) {
+  if (isLoading) {
     return <div className="flex h-screen w-full items-center justify-center">Loading Admin Portal...</div>;
   }
   
   // If claims are loaded but user is not an admin, show access denied.
   // This state should ideally be brief due to the redirect in useEffect.
-  if (claims.role !== 'admin') {
+  if (claims?.role !== 'admin') {
       return <div className="flex h-screen w-full items-center justify-center">Access Denied. Redirecting...</div>;
   }
 
