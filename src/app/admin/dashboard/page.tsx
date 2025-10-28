@@ -14,9 +14,12 @@ export default function AdminDashboardPage() {
 
     const subscriptionsCollectionRef = useMemoFirebase(() => {
         if(!firestore) return null;
-        return collection(firestore, 'teacher_subscriptions');
+        return collection(firestore, 'subscriptions');
     }, [firestore]);
     const { data: subscriptions } = useCollection(subscriptionsCollectionRef);
+
+    const activeSubscriptions = subscriptions?.filter((s: any) => s.status === 'active') ?? [];
+    const pendingSubscriptions = subscriptions?.filter((s: any) => s.status === 'awaiting_payment') ?? [];
 
   return (
     <div className="flex flex-1 flex-col">
@@ -42,7 +45,7 @@ export default function AdminDashboardPage() {
                         <CardTitle>Active Subscriptions</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <p className="text-4xl font-bold">{subscriptions?.filter(s => (s as any).paymentStatus === 'approved').length ?? 0}</p>
+                        <p className="text-4xl font-bold">{activeSubscriptions.length}</p>
                         <p className="text-sm text-muted-foreground">across all plans</p>
                     </CardContent>
                 </Card>
@@ -51,7 +54,7 @@ export default function AdminDashboardPage() {
                         <CardTitle>Pending Payments</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <p className="text-4xl font-bold">{subscriptions?.filter(s => (s as any).paymentStatus === 'pending').length ?? 0}</p>
+                        <p className="text-4xl font-bold">{pendingSubscriptions.length}</p>
                         <p className="text-sm text-muted-foreground">awaiting approval</p>
                     </CardContent>
                 </Card>
