@@ -117,7 +117,7 @@ const Pricing = () => {
                     <span className="text-4xl font-bold">{plan.pricePKR === 0 ? 'Free' : `Rs ${plan.pricePKR}`}</span>
                     <span className="text-muted-foreground">/ month</span>
                 </div>
-                <CardDescription>{plan.features.split(',')[0]}</CardDescription>
+                <CardDescription>{(plan.features || "").split(',')[0]}</CardDescription>
               </CardHeader>
               <CardContent className="flex-1">
                 <ul className="space-y-3">
@@ -125,7 +125,7 @@ const Pricing = () => {
                     <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
                     <span className="text-muted-foreground">{plan.seatLimit} Seats</span>
                   </li>
-                  {plan.features.split(',').map((feature: string, index: number) => (
+                  {(plan.features || "").split(',').map((feature: string, index: number) => (
                        <li key={index} className="flex items-start">
                            <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
                            <span className="text-muted-foreground">{feature.trim()}</span>
