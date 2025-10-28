@@ -1,5 +1,8 @@
-
 'use client';
+
+import { useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { useFirebaseAuth } from '@/firebase/provider';
 import {
   SidebarProvider,
   Sidebar,
@@ -24,100 +27,48 @@ import {
 import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { useAuth, useUser } from "@/firebase";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useToast } from "@/hooks/use-toast";
-import type { IdTokenResult } from "firebase/auth";
+import { auth } from '@/firebase/client';
 
-export default function AdminLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const auth = useAuth();
-  const { user, isLoading: isUserLoading } = useUser();
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { toast } = useToast();
-  const [claims, setClaims] = useState<IdTokenResult['claims'] | null>(null);
-  const [isLoadingClaims, setIsLoadingClaims] = useState(true);
+  const { user, claims, initializing, loadingClaims } = useFirebaseAuth();
+  const redirected = useRef(false);
+
+  const ready = !initializing && (!user ? true : !loadingClaims); // ready when no user OR user+claims loaded
+  const isAdmin = !!(claims && claims.role === 'admin');
 
   useEffect(() => {
-    console.log('[AdminLayout] useEffect triggered.', { isUserLoading, userExists: !!user });
-
-    if (isUserLoading) {
-      console.log('[AdminLayout] User state is loading. Waiting...');
-      return; // Wait until user object is resolved
-    }
+    if (!ready || redirected.current) return;
 
     if (!user) {
-      console.log('[AdminLayout] No user found. Redirecting to /admin/login.');
-      router.push("/admin/login");
+      redirected.current = true;
+      router.replace('/admin/login');
       return;
     }
 
-    console.log('[AdminLayout] User found:', user.uid, 'Requesting claims...');
-    // Force refresh to get latest claims
-    user.getIdTokenResult(true) 
-      .then((idTokenResult) => {
-        console.log('[AdminLayout] Claims received:', idTokenResult.claims);
-        setClaims(idTokenResult.claims);
-        
-        if (idTokenResult.claims.role !== 'admin') {
-          console.error('[AdminLayout] Access Denied. User role is not admin:', idTokenResult.claims.role);
-          toast({
-            variant: 'destructive',
-            title: 'Access Denied',
-            description: 'You do not have permission to view this page.'
-          });
-          // Sign out and redirect to a non-admin login to prevent loops
-          auth?.signOut();
-          router.push('/login');
-        } else {
-           console.log('[AdminLayout] Admin access GRANTED.');
-        }
-      })
-      .catch((error) => {
-        console.error("[AdminLayout] Error getting user claims:", error);
-        toast({
-          variant: 'destructive',
-          title: 'Authentication Error',
-          description: 'Could not verify your permissions.'
-        });
-        auth?.signOut();
-        router.push('/login');
-      })
-      .finally(() => {
-        console.log('[AdminLayout] Finished claims check. Setting isLoadingClaims to false.');
-        setIsLoadingClaims(false);
-      });
-
-  }, [user, isUserLoading, router, toast, auth]);
+    if (user && !isAdmin) {
+      redirected.current = true;
+      router.replace('/login'); // Redirect non-admins away
+      return;
+    }
+  }, [ready, user, isAdmin, router]);
 
   const handleLogout = async () => {
-    if (auth) {
-      await auth.signOut();
-    }
+    await auth.signOut();
     router.push('/admin/login');
   };
 
-  const isLoading = isUserLoading || isLoadingClaims;
-
-  console.log('[AdminLayout] Render state:', { isUserLoading, isLoadingClaims, finalIsLoading: isLoading, claimsExist: !!claims });
-
-  // Show loading screen while user is loading or claims are being verified
-  if (isLoading) {
-    return <div className="flex h-screen w-full items-center justify-center">Loading Admin Portal...</div>;
-  }
-  
-  // If claims are loaded but user is not an admin, show access denied.
-  // This state should ideally be brief due to the redirect in useEffect.
-  if (claims?.role !== 'admin') {
-      return <div className="flex h-screen w-full items-center justify-center">Access Denied. Redirecting...</div>;
+  if (!ready) {
+    return <div className="flex h-screen w-full items-center justify-center">Loading Admin Portal…</div>;
   }
 
+  if (!user || !isAdmin) {
+    // We triggered a redirect; render nothing to avoid flicker/loops
+    return <div className="flex h-screen w-full items-center justify-center">Redirecting...</div>;
+  }
 
+  // If we get here, user is an admin.
   return (
     <SidebarProvider>
       <Sidebar>
@@ -130,12 +81,12 @@ export default function AdminLayout({
         <SidebarContent>
           <SidebarMenu>
             <SidebarMenuItem>
-                <SidebarMenuButton asChild>
-                  <Link href="/admin/dashboard">
-                    <Home />
-                    <span>Dashboard</span>
-                  </Link>
-                </SidebarMenuButton>
+              <SidebarMenuButton asChild>
+                <Link href="/admin/dashboard">
+                  <Home />
+                  <span>Dashboard</span>
+                </Link>
+              </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton asChild>
@@ -145,7 +96,7 @@ export default function AdminLayout({
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
-             <SidebarMenuItem>
+            <SidebarMenuItem>
               <SidebarMenuButton asChild>
                 <Link href="/admin/subscriptions">
                   <Package />
@@ -173,16 +124,16 @@ export default function AdminLayout({
         </SidebarContent>
         <SidebarFooter>
           <div className="flex items-center gap-3 p-2 rounded-lg bg-secondary">
-             <Avatar className="h-9 w-9">
+            <Avatar className="h-9 w-9">
               <AvatarImage src={user?.photoURL || "https://picsum.photos/seed/admin/100/100"} alt="Admin avatar" />
               <AvatarFallback>{user?.email?.[0].toUpperCase()}</AvatarFallback>
             </Avatar>
             <div className="flex-1 overflow-hidden">
-                <p className="text-sm font-semibold text-foreground truncate">{user?.displayName || user?.email}</p>
-                <p className="text-xs text-muted-foreground capitalize flex items-center gap-1"><Shield className="h-3 w-3 text-destructive" /> Admin</p>
+              <p className="text-sm font-semibold text-foreground truncate">{user?.displayName || user?.email}</p>
+              <p className="text-xs text-muted-foreground capitalize flex items-center gap-1"><Shield className="h-3 w-3 text-destructive" /> Admin</p>
             </div>
             <Button variant="ghost" size="icon" className="shrink-0" onClick={handleLogout}>
-                <LogOut className="text-muted-foreground" />
+              <LogOut className="text-muted-foreground" />
             </Button>
           </div>
         </SidebarFooter>
