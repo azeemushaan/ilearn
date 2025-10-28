@@ -1,422 +1,376 @@
 /**
- * @fileoverview Firestore Security Rules
+ * @fileoverview Firestore Security Rules for the educational platform.
  *
  * Core Philosophy:
- * This ruleset prioritizes security by enforcing strict access control based on
- * user roles and resource ownership. Data validation is relaxed to facilitate
- * rapid prototyping, but authorization checks are robust.
+ * This ruleset prioritizes secure data access based on user roles (admin, teacher, student)
+ * and coach (tenant) ownership. It enforces strict access control, particularly for write operations.
  *
  * Data Structure:
- * The Firestore data is organized around a multi-tenant model. Coaches are the
- * top-level tenants, and most data is scoped to a specific coachId. User
- * documents are stored in a top-level /users collection and linked to coaches
- * via the coachId field.
+ * - Coaches are top-level documents in `/coaches/{coachId}`.
+ * - Users are stored in `/users/{userId}` and are associated with a coach via the `coachId` field.
+ * - Most data is organized in top-level collections, linked to coaches and/or users via `coachId` and `userId` fields.
+ * - Cohort member mappings are stored in subcollections under `/cohorts/{cohortId}/members/{userId}`.
  *
  * Key Security Decisions:
- * - Listing of users is generally disallowed to prevent information disclosure.
- * - Coaches and Users are granted create permissions only if they are signed in.
- * - Data validation is minimized in favor of rapid prototyping. However,
- *   authorization-critical fields (e.g., ownership fields) are strictly validated.
- * - Access control is implemented using helper functions to improve readability
- *   and maintainability.
+ * - Listing of users is generally disallowed except where explicitly required (e.g., cohort members).
+ * - Data validation is minimized in the prototyping phase to allow for rapid iteration.
+ * - Public read access is granted for `/playlists`, assuming these are designed to be publicly visible.
+ * - All write operations require authentication (`isSignedIn()`) and authorization checks.
  *
  * Denormalization for Authorization:
- * Several collections rely on denormalization to simplify and optimize security rules.
- * For example:
- *   - Many documents include a `coachId` field, allowing rules to quickly check
- *     if the requesting user belongs to the correct tenant.
- *
- * Structural Segregation:
- * This ruleset does not implement any structural segregation.
+ * - Coach-owned resources (e.g., Playlists, Videos, Assignments) MUST include a `coachId` field
+ *   to simplify ownership checks.
+ * - User-specific data (e.g., Attempts, Progress, Events, Notes) MUST include both `coachId` and `userId` fields.
  */
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
     /**
-     * @description Checks if the request is authenticated.
+     * @description Checks if the user is signed in.
      */
     function isSignedIn() {
       return request.auth != null;
     }
 
     /**
-     * @description Checks if the user ID matches the authenticated user's ID.
+     * @description Checks if the authenticated user is the owner of the document, based on the provided userId.
      */
     function isOwner(userId) {
-      return request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     /**
-     * @description Checks if the user ID matches the existing resource's coachId.
-     */
-    function isCoach(coachId) {
-      return request.auth.uid == coachId;
-    }
-
-    /**
-     * @description Checks if the user is deleting or updating their own resource.
+     * @description Checks if the authenticated user is the owner of the existing document.
+     *              Also verifies that the document exists to prevent accidental changes to non-existent data.
      */
     function isExistingOwner(userId) {
-        return isSignedIn() && request.auth.uid == resource.data.userId;
+        return isOwner(userId) && resource.data.userId == userId;
     }
 
     /**
-     * @description Determines if the user is the coach of a resource, for destructive changes.
+     * @description Checks if the authenticated user is an admin for the coach.
      */
-    function isExistingCoach(coachId) {
-      return isSignedIn() && request.auth.uid == resource.data.coachId;
+    function isAdminForCoach(coachId) {
+        return isSignedIn() && request.auth.token.coachId == coachId && request.auth.token.role == 'admin';
     }
 
     /**
-     * @description Checks if the user has the 'admin' role.
+     * @description Checks if the authenticated user is a teacher for the coach.
      */
-    function isAdmin() {
-      return request.auth.token.role == 'admin';
+    function isTeacherForCoach(coachId) {
+        return isSignedIn() && request.auth.token.coachId == coachId && (request.auth.token.role == 'teacher' || request.auth.token.role == 'admin');
     }
 
-    /**
-     * @description Checks if the user is a teacher.
-     */
-    function isTeacher() {
-        return request.auth.token.role == 'teacher';
-    }
 
     /**
-     * @description Checks if the user is a student.
+     * @description Defines access rules for coach documents.
+     * @path /coaches/{coachId}
+     * @allow (get) Signed-in user can get a coach.
+     * @allow (create) Signed-in user can create a coach with matching coachId.
+     * @allow (update) Signed-in user can update a coach with matching coachId.
+     * @allow (delete) Denied.
+     * @deny (get) Non-signed-in user.
+     * @deny (create) Signed-in user cannot create a coach with a mismatched coachId.
+     * @deny (update) Signed-in user cannot update a coach with a mismatched coachId.
+     * @principle Enforces coach ownership.
      */
-    function isStudent() {
-        return request.auth.token.role == 'student';
-    }
-    
     match /coaches/{coachId} {
-      /**
-       * @description Allows coaches to manage their own profiles.
-       * @path /coaches/{coachId}
-       * @allow (create) User with matching UID creates their coach profile.
-       * @deny (update) User attempts to update a coach profile with a mismatched UID.
-       * @principle Enforces document ownership for writes.
-       */
-      allow get: if isSignedIn() && request.auth.uid == coachId;
+      allow get: if isSignedIn();
       allow list: if false;
       allow create: if isSignedIn() && request.auth.uid == coachId;
       allow update: if isSignedIn() && request.auth.uid == coachId;
-      allow delete: if isSignedIn() && request.auth.uid == coachId;
+      allow delete: if false;
     }
 
+    /**
+     * @description Defines access rules for user documents.
+     * @path /users/{userId}
+     * @allow (get) Signed-in user can get their own user document.
+     * @allow (create) Signed-in user can create their own user document.
+     * @allow (update) Signed-in user can update their own user document.
+     * @allow (delete) Denied.
+     * @deny (get) Non-signed-in user.
+     * @deny (create) Signed-in user cannot create a user document with a mismatched userId.
+     * @deny (update) Signed-in user cannot update a user document with a mismatched userId.
+     * @principle Enforces user ownership and self-creation.
+     */
     match /users/{userId} {
-      /**
-       * @description Allows users to manage their own profiles.
-       * @path /users/{userId}
-       * @allow (create) User with matching UID creates their user profile.
-       * @deny (update) User attempts to update a user profile with a mismatched UID.
-       * @principle Enforces document ownership for writes.
-       */
-      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow get: if isOwner(userId);
       allow list: if false;
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isSignedIn() && request.auth.uid == userId;
-      allow delete: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isOwner(userId) && request.resource.data.coachId == request.auth.token.coachId;
+      allow update: if isOwner(userId) && request.resource.data.coachId == resource.data.coachId;
+      allow delete: if false;
     }
 
+    /**
+     * @description Defines access rules for invite documents.
+     * @path /invites/{inviteId}
+     * @allow (get) Signed-in user can get an invite if they are an admin for the coach.
+     * @allow (create) Signed-in user can create an invite if they are an admin for the coach.
+     * @allow (update) Signed-in user can update an invite if they are an admin for the coach.
+     * @allow (delete) Signed-in user can delete an invite if they are an admin for the coach.
+     * @deny (get) Non-admin user.
+     * @deny (create) Non-admin user.
+     * @deny (update) Non-admin user.
+     * @deny (delete) Non-admin user.
+     * @principle Enforces admin-only access to invites.
+     */
     match /invites/{inviteId} {
-      /**
-       * @description Allows invite management.  No specific authorization implemented yet.
-       * @path /invites/{inviteId}
-       * @allow (create) Anyone can create invites.
-       * @deny (update) Nobody can update invites.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
+      allow get: if isSignedIn() && request.auth.token.coachId == resource.data.coachId;
       allow list: if false;
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
     }
 
+    /**
+     * @description Defines access rules for cohort documents.
+     * @path /cohorts/{cohortId}
+     * @allow (get) Signed-in user can get a cohort if they are a teacher/admin for the coach.
+     * @allow (create) Signed-in user can create a cohort if they are a teacher/admin for the coach.
+     * @allow (update) Signed-in user can update a cohort if they are a teacher/admin for the coach.
+     * @allow (delete) Signed-in user can delete a cohort if they are a teacher/admin for the coach.
+     * @deny (get) Non-teacher/admin user.
+     * @deny (create) Non-teacher/admin user.
+     * @deny (update) Non-teacher/admin user.
+     * @deny (delete) Non-teacher/admin user.
+     * @principle Enforces coach-level teacher/admin access to cohorts.
+     */
     match /cohorts/{cohortId} {
-      /**
-       * @description Allows cohort management.  No specific authorization implemented yet.
-       * @path /cohorts/{cohortId}
-       * @allow (create) Anyone can create cohorts.
-       * @deny (update) Nobody can update cohorts.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /cohorts/{cohortId}/members/{userId} {
-      /**
-       * @description Allows cohort member management.  No specific authorization implemented yet.
-       * @path /cohorts/{cohortId}/members/{userId}
-       * @allow (create) Anyone can create cohort members.
-       * @deny (update) Nobody can update cohort members.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /playlists/{playlistId} {
-      /**
-       * @description Allows playlist management.  No specific authorization implemented yet.
-       * @path /playlists/{playlistId}
-       * @allow (create) Anyone can create playlists.
-       * @deny (update) Nobody can update playlists.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /videos/{videoId} {
-      /**
-       * @description Allows video management.  No specific authorization implemented yet.
-       * @path /videos/{videoId}
-       * @allow (create) Anyone can create videos.
-       * @deny (update) Nobody can update videos.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /videos/{videoId}/segments/{segmentId} {
-      /**
-       * @description Allows segment management.  No specific authorization implemented yet.
-       * @path /videos/{videoId}/segments/{segmentId}
-       * @allow (create) Anyone can create segments.
-       * @deny (update) Nobody can update segments.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
-      /**
-       * @description Allows question management.  No specific authorization implemented yet.
-       * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
-       * @allow (create) Anyone can create questions.
-       * @deny (update) Nobody can update questions.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /assignments/{assignmentId} {
-      /**
-       * @description Allows assignment management.  No specific authorization implemented yet.
-       * @path /assignments/{assignmentId}
-       * @allow (create) Anyone can create assignments.
-       * @deny (update) Nobody can update assignments.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /enrollments/{enrollmentId} {
-      /**
-       * @description Allows enrollment management.  No specific authorization implemented yet.
-       * @path /enrollments/{enrollmentId}
-       * @allow (create) Anyone can create enrollments.
-       * @deny (update) Nobody can update enrollments.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /attempts/{attemptId} {
-      /**
-       * @description Allows attempt management.  No specific authorization implemented yet.
-       * @path /attempts/{attemptId}
-       * @allow (create) Anyone can create attempts.
-       * @deny (update) Nobody can update attempts.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /progress/{progressId} {
-      /**
-       * @description Allows progress management.  No specific authorization implemented yet.
-       * @path /progress/{progressId}
-       * @allow (create) Anyone can create progress records.
-       * @deny (update) Nobody can update progress records.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /events/{eventId} {
-      /**
-       * @description Allows event logging.  No specific authorization implemented yet.
-       * @path /events/{eventId}
-       * @allow (create) Anyone can create events.
-       * @deny (update) Nobody can update events.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /notes/{noteId} {
-      /**
-       * @description Allows note taking.  No specific authorization implemented yet.
-       * @path /notes/{noteId}
-       * @allow (create) Anyone can create notes.
-       * @deny (update) Nobody can update notes.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /certificates/{certificateId} {
-      /**
-       * @description Allows certificate issuance.  No specific authorization implemented yet.
-       * @path /certificates/{certificateId}
-       * @allow (create) Anyone can create certificates.
-       * @deny (update) Nobody can update certificates.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /resources/{resourceId} {
-      /**
-       * @description Allows resource management.  No specific authorization implemented yet.
-       * @path /resources/{resourceId}
-       * @allow (create) Anyone can create resources.
-       * @deny (update) Nobody can update resources.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /subscriptions/{subId} {
-      /**
-       * @description Allows subscription management.  No specific authorization implemented yet.
-       * @path /subscriptions/{subId}
-       * @allow (create) Anyone can create subscriptions.
-       * @deny (update) Nobody can update subscriptions.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /payments/{paymentId} {
-      /**
-       * @description Allows payment tracking.  No specific authorization implemented yet.
-       * @path /payments/{paymentId}
-       * @allow (create) Anyone can create payments.
-       * @deny (update) Nobody can update payments.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /audit/{auditId} {
-      /**
-       * @description Allows audit logging.  No specific authorization implemented yet.
-       * @path /audit/{auditId}
-       * @allow (create) Anyone can create audit entries.
-       * @deny (update) Nobody can update audit entries.
-       * @principle Placeholder rule.
-       */
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    match /settings/{coachId} {
-      /**
-       * @description Allows settings retrieval for a coach.
-       * @path /settings/{coachId}
-       * @allow (get) Anyone can retrieve settings for a coach.
-       * @deny (update) Nobody can update settings directly.
-       * @principle Public read, no writes allowed.
-       */
-      allow get: if isSignedIn() && request.auth.uid == coachId;
+      allow get: if isSignedIn() && request.auth.token.coachId == resource.data.coachId;
       allow list: if false;
-      allow create: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+        /**
+     * @description Defines access rules for cohort member documents.
+     * @path /cohorts/{cohortId}/members/{userId}
+     * @allow (get) Signed-in user can get a cohort member if they are a teacher/admin for the coach or the user themselves.
+     * @allow (create) Signed-in user can create a cohort member if they are a teacher/admin for the coach.
+     * @allow (update) Signed-in user can update a cohort member if they are a teacher/admin for the coach.
+     * @allow (delete) Signed-in user can delete a cohort member if they are a teacher/admin for the coach.
+     * @deny (get) Non-teacher/admin or non-self user.
+     * @deny (create) Non-teacher/admin user.
+     * @deny (update) Non-teacher/admin user.
+     * @deny (delete) Non-teacher/admin user.
+     * @principle Enforces coach-level teacher/admin access to cohort members.
+     */
+    match /cohorts/{cohortId}/members/{userId} {
+      allow get: if isSignedIn() && ((request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher')) || isOwner(userId));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for playlist documents.
+     * @path /playlists/{playlistId}
+     * @allow (get) Public read access.
+     * @allow (create) Signed-in user can create a playlist if they are a teacher/admin for the coach and the coachId matches.
+     * @allow (update) Signed-in user can update a playlist if they are a teacher/admin for the coach and the coachId matches.
+     * @allow (delete) Signed-in user can delete a playlist if they are a teacher/admin for the coach and the coachId matches.
+     * @deny (create) Non-teacher/admin user.
+     * @deny (update) Non-teacher/admin user.
+     * @deny (delete) Non-teacher/admin user.
+     * @principle Public read, teacher/admin-only writes.
+     */
+    match /playlists/{playlistId} {
+      allow get: if true;
+      allow list: if true;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for video documents.
+     * @path /videos/{videoId}
+     * @allow (get) Signed-in user can get a video if they are a teacher/admin for the coach.
+     * @allow (create) Signed-in user can create a video if they are a teacher/admin for the coach.
+     * @allow (update) Signed-in user can update a video if they are a teacher/admin for the coach.
+     * @allow (delete) Signed-in user can delete a video if they are a teacher/admin for the coach.
+     * @deny (get) Non-teacher/admin user.
+     * @deny (create) Non-teacher/admin user.
+     * @deny (update) Non-teacher/admin user.
+     */
+    match /videos/{videoId} {
+      allow get: if isSignedIn() && request.auth.token.coachId == resource.data.coachId;
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for segment documents.
+     * @path /videos/{videoId}/segments/{segmentId}
+     */
+    match /videos/{videoId}/segments/{segmentId} {
+      allow get: if isSignedIn() && request.auth.token.coachId == get(/databases/$(database)/documents/videos/$(videoId)).data.coachId;
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == get(/databases/$(database)/documents/videos/$(videoId)).data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == get(/databases/$(database)/documents/videos/$(videoId)).data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == get(/databases/$(database)/documents/videos/$(videoId)).data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for question documents.
+     * @path /videos/{videoId}/segments/{segmentId}/questions/{questionId}
+     */
+    match /videos/{videoId}/segments/{segmentId}/questions/{questionId} {
+      allow get: if isSignedIn() && request.auth.token.coachId == get(/databases/$(database)/documents/videos/$(videoId)).data.coachId;
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == get(/databases/$(database)/documents/videos/$(videoId)).data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == get(/databases/$(database)/documents/videos/$(videoId)).data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == get(/databases/$(database)/documents/videos/$(videoId)).data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for assignment documents.
+     * @path /assignments/{assignmentId}
+     */
+    match /assignments/{assignmentId} {
+      allow get: if isSignedIn() && request.auth.token.coachId == resource.data.coachId;
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for enrollment documents.
+     * @path /enrollments/{enrollmentId}
+     */
+    match /enrollments/{enrollmentId} {
+      allow get: if isSignedIn() && (request.auth.token.coachId == resource.data.coachId || isOwner(resource.data.userId));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for attempt documents.
+     * @path /attempts/{attemptId}
+     */
+    match /attempts/{attemptId} {
+      allow get: if isSignedIn() && (request.auth.token.coachId == resource.data.coachId || isOwner(resource.data.userId));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && request.resource.data.userId == request.auth.uid;
       allow update: if false;
       allow delete: if false;
     }
-    
-    match /subscription_plans/{subPlanId} {
-        /**
-         * @description Allows public listing and reading of subscription plans.
-         * @path /subscription_plans/{subPlanId}
-         * @allow (get, list) Anyone can retrieve a list or individual subscription plan.
-         * @deny (create, update, delete) No one can modify subscription plans through the client.
-         * @principle Public read, no writes allowed.
-         */
-        allow get: if true;
-        allow list: if true;
-        allow create: if false;
-        allow update: if false;
-        allow delete: if false;
+
+    /**
+     * @description Defines access rules for progress documents.
+     * @path /progress/{progressId}
+     */
+    match /progress/{progressId} {
+      allow get: if isSignedIn() && (request.auth.token.coachId == resource.data.coachId || isOwner(resource.data.userId));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && request.resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Defines access rules for event documents.
+     * @path /events/{eventId}
+     */
+    match /events/{eventId} {
+      allow get: if isSignedIn() && (request.auth.token.coachId == resource.data.coachId || isOwner(resource.data.userId));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && request.resource.data.userId == request.auth.uid;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Defines access rules for note documents.
+     * @path /notes/{noteId}
+     */
+    match /notes/{noteId} {
+      allow get: if isSignedIn() && (request.auth.token.coachId == resource.data.coachId || isOwner(resource.data.userId));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && request.resource.data.userId == request.auth.uid;
+      allow update: if isOwner(resource.data.userId) && request.resource.data.coachId == resource.data.coachId;
+      allow delete: if isOwner(resource.data.userId) && resource.data.coachId == request.auth.token.coachId;
+    }
+
+    /**
+     * @description Defines access rules for certificate documents.
+     * @path /certificates/{certificateId}
+     */
+    match /certificates/{certificateId} {
+      allow get: if isSignedIn() && (request.auth.token.coachId == resource.data.coachId || isOwner(resource.data.userId));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Defines access rules for resource documents.
+     * @path /resources/{resourceId}
+     */
+    match /resources/{resourceId} {
+      allow get: if isSignedIn() && request.auth.token.coachId == resource.data.coachId;
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for subscription documents.
+     * @path /subscriptions/{subId}
+     */
+    match /subscriptions/{subId} {
+      allow get: if isSignedIn() && request.auth.token.coachId == resource.data.coachId;
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if isSignedIn() && request.auth.token.coachId == resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+    }
+
+    /**
+     * @description Defines access rules for payment documents.
+     * @path /payments/{paymentId}
+     */
+    match /payments/{paymentId} {
+      allow get: if isSignedIn() && (request.auth.token.coachId == resource.data.coachId || isOwner(resource.data.userId));
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    /**
+     * @description Defines access rules for audit documents.
+     * @path /audit/{auditId}
+     */
+    match /audit/{auditId} {
+      allow get: if isSignedIn() && request.auth.token.coachId == resource.data.coachId;
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if false;
+      allow delete: if false;
+    }
+
+      /**
+     * @description Defines access rules for coach settings.
+     * @path /settings/{coachId}
+     */
+    match /settings/{coachId} {
+      allow get: if isSignedIn() && request.auth.token.coachId == coachId;
+      allow list: if false;
+      allow create: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow update: if isSignedIn() && request.auth.token.coachId == request.resource.data.coachId && (request.auth.token.role == 'admin' || request.auth.token.role == 'teacher');
+      allow delete: if false;
     }
   }
 }
