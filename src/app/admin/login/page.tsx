@@ -1,77 +1,70 @@
 'use client';
 
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/firebase/client';
-import { useFirebaseAuth } from '@/firebase/provider';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import Link from 'next/link';
-import Logo from '@/components/logo';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
-export default function AdminLogin() {
-  const { refreshClaims, claims, user, initializing } = useFirebaseAuth();
+export default function AdminLoginPage() {
   const router = useRouter();
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setError(null);
     setSubmitting(true);
-    const form = new FormData(e.currentTarget);
-    const email = String(form.get('email') || 'ilearn@er21.org');
-    const password = String(form.get('password') || '');
+    setError(null);
+
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      await refreshClaims(); // force-claim refresh after login
-      router.replace('/admin/dashboard'); // provider/layout will verify role and render
+      // After login, redirect to the dashboard.
+      // The AdminLayout will handle checking claims and protecting the route.
+      router.replace('/admin/dashboard');
     } catch (err: any) {
-      setError(err?.message || 'Login failed');
-    } finally {
+      setError(err.message || 'An unknown error occurred.');
       setSubmitting(false);
     }
   };
 
-  // Optional: auto-forward if already admin
-  useEffect(() => {
-    if (!initializing && user && claims?.role === 'admin') {
-      router.replace('/admin/dashboard');
-    }
-  }, [claims, user, initializing, router]);
-
   return (
-     <main className="flex min-h-screen items-center justify-center bg-secondary/30 p-4">
-      <Card className="w-full max-w-sm shadow-xl">
-        <CardHeader className="text-center">
-          <div className="mb-4 flex justify-center">
-            <Link href="/">
-              <Logo />
-            </Link>
+    <div className="flex min-h-screen items-center justify-center bg-gray-100">
+      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
+        <h1 className="mb-6 text-center text-2xl font-bold">Admin Login</h1>
+        <form onSubmit={handleLogin} className="space-y-6">
+          <div className="space-y-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              defaultValue="ilearn@er21.org"
+              required
+              disabled={submitting}
+            />
           </div>
-          <CardTitle className="font-headline text-2xl">Admin Login</CardTitle>
-          <CardDescription>Enter your admin credentials to continue</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onSubmit} className="grid gap-4 mt-4">
-             {error && <p className="text-sm font-medium text-destructive">{error}</p>}
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input defaultValue="ilearn@er21.org" name="email" id="email" type="email" placeholder="admin@example.com" required disabled={submitting}/>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
-              <Input name="password" id="password" type="password" required disabled={submitting}/>
-            </div>
-            <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={submitting}>
-              {submitting ? "Verifying..." : "Login"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    </main>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              name="password"
+              type="password"
+              required
+              disabled={submitting}
+            />
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <Button type="submit" className="w-full" disabled={submitting}>
+            {submitting ? 'Logging in...' : 'Login'}
+          </Button>
+        </form>
+      </div>
+    </div>
   );
 }
