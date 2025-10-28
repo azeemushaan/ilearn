@@ -23,7 +23,7 @@ const SubscriptionPage = () => {
 
   const plansCollectionRef = useMemoFirebase(() => {
     if (!firestore) return null;
-    return query(collection(firestore, 'subscription_plans'), where("isActive", "==", true));
+    return collection(firestore, 'subscription_plans');
   }, [firestore]);
   
   const { data: plans, isLoading: isLoadingPlans } = useCollection(plansCollectionRef);
