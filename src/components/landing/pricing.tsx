@@ -4,18 +4,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useUser, useFirestore, useFirebaseAuth } from "@/firebase";
-import { collection, addDoc, serverTimestamp, getDocs, query, where } from "firebase/firestore";
+import { useAuth } from "@/firebase";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { collection, addDoc, serverTimestamp, getDocs, query, getFirestore } from "firebase/firestore";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { firebaseConfig } from "@/firebase/config";
 
 const Pricing = () => {
-  const { user } = useFirebaseAuth();
-  const firestore = useFirestore();
+  const { user } = useAuth();
   const router = useRouter();
 
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
@@ -25,23 +26,29 @@ const Pricing = () => {
 
   useEffect(() => {
     const fetchPlans = async () => {
-      if (!firestore) {
-        console.log("Firestore not ready, skipping fetch.");
-        return;
-      };
       setIsLoading(true);
       try {
-        const plansCollectionRef = collection(firestore, 'plans');
+        // Standalone initialization for public access
+        const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+        const db = getFirestore(app);
+        
+        const plansCollectionRef = collection(db, 'plans');
         const q = query(plansCollectionRef);
         const querySnapshot = await getDocs(q);
+        
         const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        
+        if (plansData.length === 0) {
+            console.log("No plans found in the 'plans' collection.");
+        }
+
         setPlans(plansData.sort((a, b) => a.sort - b.sort));
       } catch (error) {
         console.error("Error fetching plans:", error);
         toast({
           variant: "destructive",
           title: "Could not load pricing plans",
-          description: "Please try refreshing the page.",
+          description: "There was an issue fetching pricing information.",
         });
       } finally {
         setIsLoading(false);
@@ -49,13 +56,14 @@ const Pricing = () => {
     };
 
     fetchPlans();
-  }, [firestore]);
+  }, [toast]);
 
   const handleChoosePlan = (plan: any) => {
     if (!user) {
       router.push('/signup');
       return;
     }
+    // This part is for logged-in users and should use their authenticated firestore instance
     if (plan.pricePKR > 0) {
       setSelectedPlan(plan);
     } else {
@@ -78,11 +86,37 @@ const Pricing = () => {
   };
 
   const subscribeToPlan = async (plan: any, method: string, reference: string) => {
-    if (!firestore || !user) return;
+    if (!user) {
+        toast({ variant: "destructive", title: "You must be logged in to subscribe."});
+        return;
+    }
+    
+    // Re-initialize to ensure we are using the authenticated instance for writes
+    const app = getApps()[0];
+    const db = getFirestore(app);
 
     try {
-      await addDoc(collection(firestore, 'payments'), {
-        coachId: user.uid, // Use the logged-in user's UID as the coachId
+      const coachId = user.uid; // The logged-in user is the coach
+
+      // Check if there's already a subscription awaiting payment
+      const subsQuery = query(
+        collection(db, 'subscriptions'),
+        where('coachId', '==', coachId),
+        where('status', '==', 'awaiting_payment')
+      );
+      const existingSubs = await getDocs(subsQuery);
+
+      if (!existingSubs.empty) {
+        toast({
+          title: "Existing Request Pending",
+          description: "You already have a subscription payment awaiting verification. Please wait for it to be processed.",
+        });
+        return;
+      }
+
+
+      await addDoc(collection(db, 'payments'), {
+        coachId: coachId,
         amount: plan.pricePKR,
         currency: 'PKR',
         method: method,
@@ -94,9 +128,8 @@ const Pricing = () => {
         planTitle: plan.title,
       });
       
-      // Also create a subscription document
-      await addDoc(collection(firestore, 'subscriptions'), {
-          coachId: user.uid,
+      await addDoc(collection(db, 'subscriptions'), {
+          coachId: coachId,
           planId: plan.id,
           tier: plan.tier,
           seatLimit: plan.seatLimit,
@@ -162,7 +195,7 @@ const Pricing = () => {
                     <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
                     <span className="text-muted-foreground">{plan.seatLimit} Teacher Seats</span>
                   </li>
-                  {(plan.features || "").split('\n').filter((f: string) => f.trim() !== '').map((feature: string, index: number) => (
+                  {(plan.features || "").split('\n').slice(1).filter((f: string) => f.trim() !== '').map((feature: string, index: number) => (
                        <li key={index} className="flex items-start">
                            <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
                            <span className="text-muted-foreground">{feature.trim()}</span>
@@ -217,3 +250,5 @@ const Pricing = () => {
 };
 
 export default Pricing;
+
+    
