@@ -1,37 +1,19 @@
 'use client';
 
-import React, {
-  DependencyList,
-  createContext,
-  useContext,
-  ReactNode,
-  useMemo,
-  useState,
-  useEffect,
-  useRef,
-} from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { onAuthStateChanged, onIdTokenChanged, getIdTokenResult, User, Auth } from 'firebase/auth';
+import { auth as clientAuth } from './client';
 import { FirebaseApp } from 'firebase/app';
 import { Firestore } from 'firebase/firestore';
-import {
-  Auth,
-  User,
-  onAuthStateChanged,
-  onIdTokenChanged,
-  getIdTokenResult,
-} from 'firebase/auth';
 import { FirebaseErrorListener } from '@/components/FirebaseErrorListener';
-import { auth as clientAuth } from './client';
-import { initializeFirebase } from '.';
-
-// --- START: New Authoritative Auth Provider from Senior Dev ---
 
 type Claims = Record<string, any> | null;
 
 type AuthCtx = {
   user: User | null;
   claims: Claims;
-  initializing: boolean; // true until we know if there is a session
-  loadingClaims: boolean; // true while we fetch claims after user is known
+  initializing: boolean;     // true until we know if there is a session
+  loadingClaims: boolean;    // true while we fetch claims after user is known
   refreshClaims: () => Promise<void>;
 };
 
@@ -85,16 +67,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const value = useMemo<AuthCtx>(
-    () => ({
-      user,
-      claims,
-      initializing,
-      loadingClaims,
-      refreshClaims,
-    }),
-    [user, claims, initializing, loadingClaims]
-  );
+  const value = useMemo<AuthCtx>(() => ({
+    user, claims, initializing, loadingClaims, refreshClaims,
+  }), [user, claims, initializing, loadingClaims]);
 
   return (
     <FirebaseAuthContext.Provider value={value}>
@@ -105,45 +80,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useFirebaseAuth() {
   const ctx = useContext(FirebaseAuthContext);
-  if (!ctx)
-    throw new Error('useFirebaseAuth must be used within <AuthProvider>');
+  if (!ctx) throw new Error('useFirebaseAuth must be used within <AuthProvider>');
   return ctx;
 }
 
-// --- END: New Authoritative Auth Provider ---
 
+// --- Legacy Provider for backwards compatibility ---
 
 interface FirebaseProviderProps {
-  children: ReactNode;
+  children: React.ReactNode;
   firebaseApp: FirebaseApp | null;
   firestore: Firestore | null;
   auth: Auth | null;
 }
 
-// Combined state for the Firebase context
 export interface FirebaseContextState {
   firebaseApp: FirebaseApp | null;
   firestore: Firestore | null;
   auth: Auth | null;
-  user: User | null; // Kept for backward compatibility with other components
-  isLoading: boolean; // Kept for backward compatibility
+  user: User | null;
+  isLoading: boolean;
 }
 
-// React Context
-export const FirebaseContext = createContext<FirebaseContextState | undefined>(
-  undefined
-);
+export const FirebaseContext = createContext<FirebaseContextState | undefined>(undefined);
 
-/**
- * FirebaseProvider manages and provides Firebase services and user authentication state.
- */
 export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
   children,
   firebaseApp,
   firestore,
   auth,
 }) => {
-  const { user, initializing } = useFirebaseAuth(); // Get user from new provider
+  const { user, initializing, loadingClaims } = useFirebaseAuth();
 
   const contextValue = useMemo(
     (): FirebaseContextState => ({
@@ -151,9 +118,9 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
       firestore,
       auth,
       user,
-      isLoading: initializing, // Map new `initializing` state to old `isLoading`
+      isLoading: initializing || loadingClaims,
     }),
-    [firebaseApp, firestore, auth, user, initializing]
+    [firebaseApp, firestore, auth, user, initializing, loadingClaims]
   );
 
   return (
@@ -164,7 +131,6 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
   );
 };
 
-
 function useFirebaseContext() {
   const context = useContext(FirebaseContext);
   if (context === undefined) {
@@ -173,40 +139,16 @@ function useFirebaseContext() {
   return context;
 }
 
-/** Hook to access Firebase Auth instance. */
-export const useAuth = (): Auth | null => {
-  return useFirebaseContext().auth;
-};
+export const useAuth = (): Auth | null => useFirebaseContext().auth;
+export const useFirestore = (): Firestore | null => useFirebaseContext().firestore;
+export const useFirebaseApp = (): FirebaseApp | null => useFirebaseContext().firebaseApp;
+export const useUser = () => useFirebaseAuth();
 
-/** Hook to access Firestore instance. */
-export const useFirestore = (): Firestore | null => {
-  return useFirebaseContext().firestore;
-};
 
-/** Hook to access Firebase App instance. */
-export const useFirebaseApp = (): FirebaseApp | null => {
-  return useFirebaseContext().firebaseApp;
-};
-
-/**
- * Hook specifically for accessing the authenticated user's state.
- * This now uses the new, more reliable AuthProvider internally.
- */
-export const useUser = () => {
-  const { user, initializing, loadingClaims } = useFirebaseAuth();
-  return { user, isLoading: initializing || loadingClaims };
-};
-
-type MemoFirebase<T> = T & { __memo?: boolean };
-
-export function useMemoFirebase<T>(
-  factory: () => T,
-  deps: DependencyList
-): T | MemoFirebase<T> {
-  const memoized = useMemo(factory, deps);
-
-  if (typeof memoized !== 'object' || memoized === null) return memoized;
-  (memoized as MemoFirebase<T>).__memo = true;
-
-  return memoized;
+export function useMemoFirebase<T>(factory: () => T, deps: React.DependencyList): T {
+    const memoized = useMemo(factory, deps);
+    if (typeof memoized === 'object' && memoized !== null) {
+        (memoized as any).__memo = true;
+    }
+    return memoized;
 }

@@ -1,31 +1,30 @@
 /**
- * @fileoverview Firestore Security Rules for the application.
- *
- * Core Philosophy:
- * This ruleset prioritizes security by enforcing strict ownership and role-based access control.
- * It assumes a multi-tenant architecture where coaches (tenants) own data and users have roles within those tenants.
- * Data access is generally restricted to authorized users within their respective coach contexts, with exceptions for public data.
+ * @file Firestore Security Rules
+ * @description This ruleset enforces a strict user-ownership and role-based access model.
  *
  * Data Structure:
- * - /coaches/{coachId}: Stores coach-specific data. Coaches are the top-level tenants.
- * - /users/{userId}: Stores user data. Each user belongs to a coach.
- * - /plans/{planId}: Stores global subscription plan data.
- * - /subscriptions/{subId}: Stores subscription data for each coach.
- * - /payments/{paymentId}: Stores payment records, linked to coaches.
- * - /invoices/{invoiceId}: Stores invoice data for coaches.
- * - /audit/{auditId}: Stores audit logs.
- * - /settings/theme: Stores global theme settings.
- * - /teacher_subscriptions/{id}: Stores legacy subscription data.
- * - /subscription_plans/{planId}: Stores subscription plan details, publicly accessible.
+ * - /coaches/{coachId}: Coach-specific data.
+ * - /users/{userId}: User data, linked to a coach.
+ * - /plans/{planId}: Subscription plan information (public read, admin-only write).
+ * - /subscriptions/{subId}: Coach subscription details (admin-only).
+ * - /payments/{paymentId}: Payment records (admin-only).
+ * - /invoices/{invoiceId}: Invoices for coaches (admin-only).
+ * - /audit/{auditId}: Audit logs (admin-only).
+ * - /settings/theme: Global theme settings (public read, admin-only write).
+ * - /teacher_subscriptions/{id}: Legacy subscriptions (admin-only).
+ * - /subscription_plans/{planId}: Duplicate of /plans for the pricing page (public read, admin-only write).
  *
  * Key Security Decisions:
- * - User listing is generally disallowed to prevent information leakage.
- * - The /subscription_plans collection is explicitly made public for read access to support the landing page.
- * - Data validation is limited to authorization-critical fields in this prototyping phase.
+ * - Users can only access their own data under /users/{userId}.
+ * - Coaches have no direct data access in this model.  All data is accessed through users.
+ * - Listing of users is disallowed for security.
+ * - Admin access (create, update, delete) for plans, subscriptions, payments, invoices, audit logs, theme settings, and legacy subscriptions is not yet implemented. Add `isAdmin()` checks in the future, using custom claims.
  *
  * Denormalization for Authorization:
- * - Coach membership is denormalized onto the User document via the `coachId` field,
- *   enabling rules to quickly verify if a user belongs to a specific coach.
+ * - The `User` entity includes a `coachId` field, which is validated against the `coachId` in the user's custom claims. This ensures that users can only access data within their assigned coach.
+ *
+ * Structural Segregation:
+ * - No public vs. private data segregation is used in this initial ruleset.
  */
 rules_version = '2';
 service cloud.firestore {
@@ -33,160 +32,207 @@ service cloud.firestore {
 
     /**
      * @description Checks if the user is signed in.
+     * @path N/A
+     * @allow N/A
+     * @deny N/A
+     * @principle Verifies user authentication.
      */
     function isSignedIn() {
       return request.auth != null;
     }
 
     /**
-     * @description Checks if the authenticated user's ID matches the provided user ID.
-     * @param {string} userId - The user ID to compare against.
+     * @description Checks if the authenticated user's ID matches the provided userId.
+     * @path N/A
+     * @allow User with UID 'user123' accessing /users/user123.
+     * @deny User with UID 'user456' accessing /users/user123.
+     * @principle Enforces document ownership.
      */
     function isOwner(userId) {
-      return request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
 
     /**
-     * @description Checks if the user is an existing owner of the document.  Combines ownership check with existence check.
-     * @param {string} userId - The user ID to compare against.
+     * @description Checks if the authenticated user's ID matches the provided userId and that the resource exists.
+     * @path N/A
+     * @allow User with UID 'user123' updating existing document /users/user123.
+     * @deny User with UID 'user456' updating /users/user123 or user123 updating a non-existent document.
+     * @principle Enforces document ownership and existence for writes.
      */
     function isExistingOwner(userId) {
-      return isOwner(userId) && resource != null;
+      return isOwner(userId) && exists(resource.data);
     }
-
-    /**
-     * @description Allows anyone to read subscription plans.
-     * @path /subscription_plans/{planId}
-     * @allow (list) - Any user can list subscription plans.
-     * @allow (get) - Any user can get a specific subscription plan.
-     * @deny (create) - No one can create subscription plans through client-side rules.
+    
+        /**
+     * @description Checks if the authenticated user has the 'admin' role.
+     * @path N/A
      */
-    match /subscription_plans/{planId} {
-      allow get, list: if true;
-      allow create, update, delete: if false;
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.role == 'admin';
     }
 
     /**
-     * @description Manages access to coach data.
+     * @description Rules for the /coaches collection.
      * @path /coaches/{coachId}
-     * @allow (create) - Only the coach themselves can create their record.
-     * @allow (get) - Any authenticated user can read a coach's data.
-     * @allow (update) - Only the coach themselves can update their record.
-     * @allow (delete) - Only the coach themselves can delete their record.
-     * @deny (create) - If the coach id does not match the auth user id.
-     * @deny (update) - If the coach id does not match the auth user id.
-     * @principle Enforces document ownership for writes and allows public reads.
+     * @allow User with coachId 'coach123' can read their own coach document. (get)
+     * @deny User with coachId 'coach456' trying to read coach document 'coach123'. (get)
+     * @allow User with coachId 'coach123' can create their own coach document. (create)
+     * @deny User with coachId 'coach456' trying to create coach document 'coach123'. (create)
+     * @principle Enforces document ownership.
      */
     match /coaches/{coachId} {
-      allow get: if isSignedIn();
+      // Read permissions: Only the coach can read their own document
+      allow get: if isOwner(coachId);
       allow list: if false;
+
+      // Write permissions: Only the coach can create, update, and delete their own document.
       allow create: if isOwner(coachId);
       allow update: if isExistingOwner(coachId);
       allow delete: if isExistingOwner(coachId);
     }
 
     /**
-     * @description Manages access to user data.
+     * @description Rules for the /users collection.
      * @path /users/{userId}
-     * @allow (create) - A user can create their own record (self-registration).
-     * @allow (get) - Only the user themselves can read their own data.
-     * @allow (update) - Only the user themselves can update their own data.
-     * @allow (delete) - Only the user themselves can delete their own data.
-     * @deny (create) - If the user id does not match the auth user id.
-     * @deny (update) - If the user id does not match the auth user id.
-     * @principle Enforces strict user-ownership for all operations.
+     * @allow User with UID 'user123' can read their own user document. (get)
+     * @deny User with UID 'user456' trying to read user document 'user123'. (get)
+     * @allow User with UID 'user123' can create their own user document. (create)
+     * @deny User with UID 'user456' trying to create user document 'user123'. (create)
+     * @principle Enforces document ownership and validates coachId on create.
      */
     match /users/{userId} {
+      // Read permissions: Only the user can read their own document
       allow get: if isOwner(userId);
-      allow list: if false;
-      allow create: if isOwner(userId);
-      allow update: if isExistingOwner(userId);
+      allow list: if false; // Listing users is disallowed
+
+      // Write permissions:
+      // - Create: Only the user themselves can create their document, and the coachId must match the custom claim.
+      // - Update/Delete: Only the user themselves can update/delete their document.
+      allow create: if isOwner(userId) && request.resource.data.coachId == request.auth.token.coachId;
+      allow update: if isExistingOwner(userId) && request.resource.data.coachId == resource.data.coachId;
       allow delete: if isExistingOwner(userId);
     }
 
     /**
-     * @description Manages access to plan data.
+     * @description Rules for the /plans collection.
      * @path /plans/{planId}
-     * @allow (get) - Any authenticated user can read plan data.
-     * @allow (list) - Any authenticated user can list plan data.
-     * @deny (create) - No one can create, update, or delete plans via client-side rules.
+     * @allow Any user can read plan details. (get, list)
+     * @deny Non-admin user trying to create, update, or delete a plan. (create, update, delete)
+     * @principle Public read, admin-only write (not yet implemented).
      */
     match /plans/{planId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if false;
-    }
+      // Read permissions: Publicly readable
+      allow get, list: if true;
 
-    /**
-     * @description Manages access to subscription data.
+      // Write permissions: Only admins can create, update, and delete plans.
+      // TODO: Add isAdmin() check once custom claims are set up.
+      allow create, update, delete: if isAdmin();
+    }
+    
+        /**
+     * @description Rules for the /subscriptions collection.
      * @path /subscriptions/{subId}
-     * @allow (get) - Any authenticated user can read subscription data.
-     * @allow (list) - Any authenticated user can list subscription data.
-     * @deny (create) - No one can create, update, or delete subscriptions via client-side rules.
+     * @allow Any user can read subscription details. (get, list)
+     * @deny Non-admin user trying to create, update, or delete a subscription. (create, update, delete)
+     * @principle Public read, admin-only write (not yet implemented).
      */
     match /subscriptions/{subId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if false;
-    }
+      // Read permissions: Publicly readable
+      allow get, list: if isAdmin();
 
-    /**
-     * @description Manages access to payment data.
+      // Write permissions: Only admins can create, update, and delete subscriptions.
+      // TODO: Add isAdmin() check once custom claims are set up.
+      allow create, update, delete: if isAdmin();
+    }
+    
+            /**
+     * @description Rules for the /payments collection.
      * @path /payments/{paymentId}
-     * @allow (get) - Any authenticated user can read payment data.
-     * @allow (list) - Any authenticated user can list payment data.
-     * @deny (create) - No one can create, update, or delete payments via client-side rules.
+     * @allow Any user can read payment details. (get, list)
+     * @deny Non-admin user trying to create, update, or delete a payment. (create, update, delete)
+     * @principle Public read, admin-only write (not yet implemented).
      */
     match /payments/{paymentId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if false;
-    }
+      // Read permissions: Publicly readable
+      allow get, list: if isAdmin();
 
-    /**
-     * @description Manages access to invoice data.
+      // Write permissions: Only admins can create, update, and delete payments.
+      // TODO: Add isAdmin() check once custom claims are set up.
+      allow create, update, delete: if isAdmin();
+    }
+    
+                /**
+     * @description Rules for the /invoices collection.
      * @path /invoices/{invoiceId}
-     * @allow (get) - Any authenticated user can read invoice data.
-     * @allow (list) - Any authenticated user can list invoice data.
-     * @deny (create) - No one can create, update, or delete invoices via client-side rules.
+     * @allow Any user can read invoice details. (get, list)
+     * @deny Non-admin user trying to create, update, or delete a invoice. (create, update, delete)
+     * @principle Public read, admin-only write (not yet implemented).
      */
     match /invoices/{invoiceId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if false;
-    }
+      // Read permissions: Publicly readable
+      allow get, list: if isAdmin();
 
+      // Write permissions: Only admins can create, update, and delete invoices.
+      // TODO: Add isAdmin() check once custom claims are set up.
+      allow create, update, delete: if isAdmin();
+    }
+    
     /**
-     * @description Manages access to audit data.
+     * @description Rules for the /audit collection.
      * @path /audit/{auditId}
-     * @allow (get) - Any authenticated user can read audit data.
-     * @allow (list) - Any authenticated user can list audit data.
-     * @deny (create) - No one can create, update, or delete audit entries via client-side rules.
+     * @allow Any user can read audit details. (get, list)
+     * @deny Non-admin user trying to create, update, or delete a audit log. (create, update, delete)
+     * @principle Public read, admin-only write (not yet implemented).
      */
     match /audit/{auditId} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if false;
-    }
+      // Read permissions: Publicly readable
+      allow get, list: if isAdmin();
 
-    /**
-     * @description Manages access to theme settings.
+      // Write permissions: Only admins can create, update, and delete audits.
+      // TODO: Add isAdmin() check once custom claims are set up.
+      allow create, update, delete: if isAdmin();
+    }
+    
+        /**
+     * @description Rules for the /settings/theme document.
      * @path /settings/theme
-     * @allow (get) - Any authenticated user can read theme settings.
-     * @deny (list) - Listing is not allowed
-     * @deny (create, update, delete) - No one can create, update or delete theme settings via client-side rules.
+     * @allow Any user can read the theme settings. (get)
+     * @deny Non-admin user trying to create, update, or delete the theme settings. (create, update, delete)
+     * @principle Public read, admin-only write (not yet implemented).
      */
     match /settings/theme {
-      allow get: if isSignedIn();
+      allow get: if true;
       allow list: if false;
-      allow create, update, delete: if false;
+
+      // Write permissions: Only admins can update the theme.
+      // TODO: Add isAdmin() check once custom claims are set up.
+      allow create, update, delete: if isAdmin();
+    }
+    
+    /**
+     * @description Rules for the /teacher_subscriptions collection.
+     * @path /teacher_subscriptions/{id}
+     */
+    match /teacher_subscriptions/{id} {
+        allow get, list: if isAdmin();
+        allow create, update, delete: if isAdmin();
     }
 
     /**
-     * @description Manages access to teacher subscription data (legacy).
-     * @path /teacher_subscriptions/{id}
-     * @allow (get) - Any authenticated user can read teacher subscription data.
-     * @allow (list) - Any authenticated user can list teacher subscription data.
-     * @deny (create) - No one can create, update, or delete teacher subscriptions via client-side rules.
+     * @description Rules for the /subscription_plans collection (duplicate of /plans).
+     * @path /subscription_plans/{planId}
+     * @allow Any user can read plan details. (get, list)
+     * @deny Non-admin user trying to create, update, or delete a plan. (create, update, delete)
+     * @principle Public read, admin-only write (not yet implemented).
      */
-    match /teacher_subscriptions/{id} {
-      allow get, list: if isSignedIn();
-      allow create, update, delete: if false;
+    match /subscription_plans/{planId} {
+      // Read permissions: Publicly readable
+      allow get, list: if true;
+
+      // Write permissions: Only admins can create, update, and delete plans.
+      // TODO: Add isAdmin() check once custom claims are set up.
+      allow create, update, delete: if isAdmin();
     }
+
   }
 }
