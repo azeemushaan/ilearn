@@ -37,10 +37,10 @@ const SubscriptionPage = () => {
   const currentSubscription = subscriptions?.[0];
 
   const handleChoosePlan = (plan: any) => {
-    if (plan.price > 0) {
+    const isFree = (plan.priceUSD === 0 && plan.pricePKR === 0);
+    if (!isFree) {
       setSelectedPlan(plan);
     } else {
-      // Handle free plan subscription directly
       subscribeToPlan(plan, "free", "");
     }
   };
@@ -62,7 +62,7 @@ const SubscriptionPage = () => {
   };
 
   const subscribeToPlan = async (plan: any, method: string, reference: string) => {
-    if (!user || !claims?.coachId || !firestore) {
+    if (!claims?.coachId || !firestore) {
         toast({ variant: "destructive", title: "You must be logged in to subscribe."});
         return;
     }
@@ -77,11 +77,12 @@ const SubscriptionPage = () => {
 
     try {
       const coachId = claims.coachId;
+      const amount = plan.currency === 'USD' ? plan.priceUSD : plan.pricePKR;
 
       await addDoc(collection(firestore, 'payments'), {
         coachId: coachId,
-        amount: plan.price,
-        currency: 'PKR',
+        amount: amount,
+        currency: plan.currency,
         method: method,
         status: method === 'free' ? 'approved' : 'pending',
         reference: reference,
@@ -131,6 +132,16 @@ const SubscriptionPage = () => {
         <span className="text-muted-foreground">{text}</span>
     </li>
   );
+  
+  const getPriceDisplay = (plan: any) => {
+    const isFree = plan.priceUSD === 0 && plan.pricePKR === 0;
+    if (isFree) return 'Free';
+    
+    const price = plan.currency === 'USD' ? plan.priceUSD : plan.pricePKR;
+    const symbol = plan.currency === 'USD' ? '$' : 'Rs';
+    return `${symbol}${price}`;
+  }
+
 
   const isLoading = isLoadingPlans || isLoadingSubs;
 
@@ -152,8 +163,8 @@ const SubscriptionPage = () => {
                 )}
                 <CardTitle className="text-2xl font-headline">{plan.name}</CardTitle>
                 <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-bold">{plan.price === 0 ? 'Free' : `Rs ${plan.price}`}</span>
-                    <span className="text-muted-foreground">/ month</span>
+                    <span className="text-4xl font-bold">{getPriceDisplay(plan)}</span>
+                    {!(plan.priceUSD === 0 && plan.pricePKR === 0) && <span className="text-muted-foreground">/ month</span>}
                 </div>
                 <CardDescription>{plan.description}</CardDescription>
               </CardHeader>
@@ -183,7 +194,7 @@ const SubscriptionPage = () => {
                 <DialogHeader>
                     <DialogTitle>Manual Bank Transfer</DialogTitle>
                     <DialogDescription>
-                        To subscribe to the {selectedPlan?.name} plan, please transfer Rs {selectedPlan?.price} to the following account:
+                        To subscribe to the {selectedPlan?.name} plan, please transfer {getPriceDisplay(selectedPlan)} to the following account:
                     </DialogDescription>
                 </DialogHeader>
                 <div className="py-4 space-y-4">

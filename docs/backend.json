@@ -63,18 +63,24 @@
         "type": "object",
         "description": "Subscription plan details",
         "properties": {
-            "title": { "type": "string" },
+            "name": { "type": "string" },
+            "description": { "type": "string" },
             "tier": { "type": "string", "enum": ["free", "pro", "enterprise"] },
-            "pricePKR": { "type": "number" },
             "priceUSD": { "type": "number" },
-            "seatLimit": { "type": "number" },
+            "pricePKR": { "type": "number" },
+            "currency": { "type": "string", "enum": ["USD", "PKR"] },
+            "maxStudents": { "type": "number" },
+            "maxPlaylists": { "type": "number" },
             "features": { "type": "string" },
+            "enableQuizGeneration": { "type": "boolean" },
+            "enableProgressTracking": { "type": "boolean" },
+            "enableAntiSkip": { "type": "boolean" },
             "isActive": { "type": "boolean" },
             "sort": { "type": "number" },
             "createdAt": { "type": "string", "format": "date-time" },
             "updatedAt": { "type": "string", "format": "date-time" }
         },
-        "required": ["title", "tier", "pricePKR", "seatLimit", "isActive", "sort"]
+        "required": ["name", "tier", "maxStudents", "maxPlaylists", "isActive", "sort"]
     },
     "Subscription": {
         "title": "Subscription",

@@ -26,7 +26,9 @@ import { Badge } from "@/components/ui/badge";
 const planSchema = z.object({
   name: z.string().min(1, "Plan name is required"),
   description: z.string().min(1, "Description is required"),
-  price: z.preprocess((a) => parseFloat(z.string().parse(a)), z.number().min(0)),
+  priceUSD: z.preprocess((a) => parseFloat(z.string().parse(a)), z.number().min(0)),
+  pricePKR: z.preprocess((a) => parseFloat(z.string().parse(a)), z.number().min(0)),
+  currency: z.enum(["USD", "PKR"]),
   maxStudents: z.preprocess((a) => parseInt(z.string().parse(a), 10), z.number().int().min(0)),
   maxPlaylists: z.preprocess((a) => parseInt(z.string().parse(a), 10), z.number().int().min(0)),
   tier: z.enum(["free", "pro", "enterprise"]),
@@ -55,7 +57,9 @@ export default function PlansPage() {
     defaultValues: {
         name: "",
         description: "",
-        price: 0,
+        priceUSD: 0,
+        pricePKR: 0,
+        currency: "USD",
         maxStudents: 10,
         maxPlaylists: 1,
         tier: "free",
@@ -129,9 +133,21 @@ export default function PlansPage() {
                      {errors.description && <p className="text-red-500 text-sm">{errors.description.message}</p>}
                   </div>
                    <div className="space-y-2">
-                    <Label htmlFor="price">Price ($)</Label>
-                    <Input id="price" type="number" {...register("price")} />
-                     {errors.price && <p className="text-red-500 text-sm">{errors.price.message}</p>}
+                    <Label htmlFor="priceUSD">Price (USD)</Label>
+                    <Input id="priceUSD" type="number" {...register("priceUSD")} />
+                     {errors.priceUSD && <p className="text-red-500 text-sm">{errors.priceUSD.message}</p>}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="pricePKR">Price (PKR)</Label>
+                    <Input id="pricePKR" type="number" {...register("pricePKR")} />
+                     {errors.pricePKR && <p className="text-red-500 text-sm">{errors.pricePKR.message}</p>}
+                  </div>
+                   <div className="space-y-2">
+                    <Label htmlFor="currency">Default Currency</Label>
+                    <select id="currency" {...register("currency")} className="w-full border p-2 rounded-md bg-transparent">
+                        <option value="USD">USD ($)</option>
+                        <option value="PKR">PKR (Rs)</option>
+                    </select>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="maxStudents">Student Seats</Label>
@@ -206,16 +222,16 @@ export default function PlansPage() {
                   <CardHeader>
                     <CardTitle className="flex justify-between items-center">
                         {plan.name}
-                        <Badge variant={plan.price === 0 ? "secondary" : "default"}>
-                            {plan.price === 0 ? 'Free' : `$${plan.price}`}
+                        <Badge variant={plan.priceUSD === 0 && plan.pricePKR === 0 ? "secondary" : "default"}>
+                            {plan.currency === 'USD' ? `$${plan.priceUSD}` : `Rs${plan.pricePKR}`}
                         </Badge>
                     </CardTitle>
                      <CardDescription>{plan.description}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                      <ul className="space-y-2">
-                        <li className="flex items-center gap-2 text-sm"><Check className="h-4 w-4 text-green-500" />{plan.maxStudents} Student Seats</li>
-                        <li className="flex items-center gap-2 text-sm"><Check className="h-4 w-4 text-green-500" />{plan.maxPlaylists} Playlists</li>
+                        <Feature included={true} text={`${plan.maxStudents} Student Seats`} />
+                        <Feature included={true} text={`${plan.maxPlaylists} Playlists`} />
                         <Feature included={plan.enableQuizGeneration} text="AI Quiz Generation" />
                         <Feature included={plan.enableProgressTracking} text="Progress Tracking" />
                         <Feature included={plan.enableAntiSkip} text="Anti-Skip Controls" />

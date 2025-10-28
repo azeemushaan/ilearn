@@ -5,19 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useFirestore, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, addDoc, serverTimestamp, getDocs, query, where, getFirestore } from "firebase/firestore";
+import { collection, getDocs, query, getFirestore } from "firebase/firestore";
 import { getApps, initializeApp } from "firebase/app";
 import { firebaseConfig } from "@/firebase/config";
-import { useAuth } from "@/firebase";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 const Pricing = () => {
-  const { user } = useAuth();
   const router = useRouter();
-
   const [plans, setPlans] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -29,7 +25,7 @@ const Pricing = () => {
         const db = getFirestore(app);
         
         const plansCollectionRef = collection(db, 'subscription_plans');
-        const q = query(plansCollectionRef, where("isActive", "==", true));
+        const q = query(plansCollectionRef);
         const querySnapshot = await getDocs(q);
         
         const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -61,6 +57,14 @@ const Pricing = () => {
     </li>
   );
 
+  const getPriceDisplay = (plan: any) => {
+    const isFree = plan.priceUSD === 0 && plan.pricePKR === 0;
+    if (isFree) return 'Free';
+    
+    const price = plan.currency === 'USD' ? plan.priceUSD : plan.pricePKR;
+    const symbol = plan.currency === 'USD' ? '$' : 'Rs';
+    return `${symbol}${price}`;
+  }
 
   return (
     <section id="pricing" className="py-16 md:py-24 bg-secondary/30">
@@ -83,9 +87,9 @@ const Pricing = () => {
                     <div className="text-sm font-semibold text-accent -mt-2 mb-2">MOST POPULAR</div>
                 )}
                 <CardTitle className="text-2xl font-headline">{plan.name}</CardTitle>
-                <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-bold">{plan.price === 0 ? 'Free' : `Rs ${plan.price}`}</span>
-                    <span className="text-muted-foreground">/ month</span>
+                 <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-bold">{getPriceDisplay(plan)}</span>
+                    {!(plan.priceUSD === 0 && plan.pricePKR === 0) && <span className="text-muted-foreground">/ month</span>}
                 </div>
                 <CardDescription>{plan.description}</CardDescription>
               </CardHeader>
