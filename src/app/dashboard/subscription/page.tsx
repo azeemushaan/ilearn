@@ -1,3 +1,4 @@
+
 'use client';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -134,6 +135,7 @@ const SubscriptionPage = () => {
   );
   
   const getPriceDisplay = (plan: any) => {
+    if (!plan) return '';
     const isFree = plan.priceUSD === 0 && plan.pricePKR === 0;
     if (isFree) return 'Free';
     
