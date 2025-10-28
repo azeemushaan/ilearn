@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useEffect, useRef } from 'react';
@@ -37,40 +38,50 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const redirected = useRef(false);
 
   const onLoginPage = pathname === '/admin/login';
+  
+  // Ready is true only when we are NOT initializing and (either there's no user, OR we're not loading claims for an existing user)
   const ready = !initializing && (user ? !loadingClaims : true);
   const isAdmin = !!(claims && claims.role === 'admin');
 
   useEffect(() => {
-    // This effect should not run on the login page.
-    if (onLoginPage || redirected.current || !ready) {
+    // On the login page, we don't need to do any auth checks.
+    if (onLoginPage) {
+      return;
+    }
+    
+    // If we're not ready yet, or have already initiated a redirect, just wait.
+    if (!ready || redirected.current) {
       return;
     }
 
+    // If we're ready but there's no user, redirect to login.
     if (!user) {
       redirected.current = true;
       router.replace('/admin/login');
       return;
     }
 
+    // If we're ready and have a user, but they aren't an admin, redirect them away.
     if (user && !isAdmin) {
       redirected.current = true;
-      router.replace('/login');
+      router.replace('/login'); // Redirect non-admins to the standard user login/dashboard
       return;
     }
 
   }, [ready, user, isAdmin, router, onLoginPage]);
 
-  // If on the login page, just render the content.
+  // If the user is on the login page, just render the form.
   if (onLoginPage) {
     return <>{children}</>;
   }
 
-  // While checking auth state, show a loading indicator.
+  // While checking auth state, show a global loading indicator.
   if (!ready) {
     return <div className="flex h-screen w-full items-center justify-center">Loading Admin Portal…</div>;
   }
   
-  // If we're ready but the user isn't an admin, they are being redirected. Render null to avoid flicker.
+  // If we are ready, but the user isn't an admin, they are being redirected. 
+  // Render null to avoid a flicker of the admin dashboard.
   if (!isAdmin) {
     return null;
   }
@@ -80,7 +91,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     router.push('/admin/login');
   };
   
-  // If we are here, user is an admin. Render the full dashboard layout.
+  // If we've made it this far, the user is an authenticated admin. Render the full dashboard.
   return (
     <SidebarProvider>
       <Sidebar>

@@ -1,3 +1,4 @@
+
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
@@ -73,7 +74,6 @@ export function FirebaseProvider({ children }: { children: React.ReactNode }) {
   }), [user, claims, initializing, loadingClaims]);
   
   const firebaseServices = useMemo(() => {
-    // This is safe to run on client, it's idempotent
     return initializeFirebase();
   }, []);
 
@@ -131,6 +131,7 @@ function useFirebaseContext() {
 export const useAuth = (): Auth | null => useFirebaseContext().auth;
 export const useFirestore = (): Firestore | null => useFirebaseContext().firestore;
 export const useFirebaseApp = (): FirebaseApp | null => useFirebaseContext().firebaseApp;
+// This export is now the proper way to get user state, including claims and loading status.
 export const useUser = () => useFirebaseAuth();
 
 

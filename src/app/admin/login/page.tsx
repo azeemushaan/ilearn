@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -28,7 +29,9 @@ export default function AdminLoginPage() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
+      // Force a refresh of the ID token to get the latest custom claims
       await refreshClaims();
+      // Redirect to the dashboard; the layout will handle verification
       router.replace('/admin/dashboard');
     } catch (err: any) {
       setError(err.message || 'An unknown error occurred.');

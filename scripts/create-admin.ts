@@ -72,29 +72,30 @@ async function createAdmin() {
     await admin.auth().setCustomUserClaims(uid, customClaims);
     console.log("🔑 Custom claims set successfully:", customClaims);
 
+    const firestore = admin.firestore();
+
     // --- 2. Create/Update Firestore Coach Document ---
-    const coachRef = admin.firestore().collection("coaches").doc(uid);
+    const coachRef = firestore.collection("coaches").doc(uid);
     await coachRef.set({
       displayName: "iLearn Admin",
       email: EMAIL,
       plan: { tier: 'enterprise', seats: 999 },
       settings: { locale: 'en', lowBandwidthDefault: false },
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
     console.log(`Firestore document updated for coach: /coaches/${uid}`);
 
     // --- 3. Create/Update Firestore User Document ---
-    const userRef = admin.firestore().collection("users").doc(uid);
+    const userRef = firestore.collection("users").doc(uid);
     await userRef.set({
       coachId: uid, // User is linked to their own coach document
       role: 'admin',
       profile: {
         name: "iLearn Admin",
         email: EMAIL,
+        photoUrl: userRecord.photoURL || '',
       },
       status: 'active',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
     console.log(`Firestore document updated for user: /users/${uid}`);
