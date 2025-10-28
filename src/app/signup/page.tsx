@@ -11,7 +11,7 @@ import { GoogleAuthProvider, signInWithPopup, createUserWithEmailAndPassword, Us
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { doc, setDoc, serverTimestamp, addDoc, collection } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, addDoc, collection, getDoc } from "firebase/firestore";
 import { setUserClaims } from "@/ai/flows/set-user-claims";
 
 const GoogleIcon = () => (
@@ -29,12 +29,12 @@ export default function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleLoginSuccess = async (user: User) => {
-    if (!firestore || !auth) return;
+    if (!auth) return;
     
-    // Force a token refresh to get the latest custom claims
-    await user.getIdToken(true);
+    await user.getIdToken(true); // Force refresh
     const tokenResult = await user.getIdTokenResult();
     const claims = tokenResult.claims;
 
@@ -45,20 +45,28 @@ export default function SignupPage() {
     }
   };
 
-  const createOrUpdateUser = async (user: User, name: string) => {
+  const createOrUpdateUser = async (user: User, displayName: string) => {
     if (!firestore) throw new Error("Firestore not available");
     
+    const userRef = doc(firestore, "users", user.uid);
+    const userDoc = await getDoc(userRef);
+
+    // If user document already exists, don't overwrite claims or coach.
+    if(userDoc.exists()) {
+        console.log("User document already exists. Skipping creation.");
+        return;
+    }
+
     const isSpecialAdmin = user.email?.toLowerCase() === 'ilearn@er21.org';
     const role = isSpecialAdmin ? 'admin' : 'teacher';
-
     let coachId: string;
-    
-    // The special admin is their own coach
+
     if (isSpecialAdmin) {
+        // The admin user is their own coach.
         coachId = user.uid;
         const coachRef = doc(firestore, "coaches", coachId);
         await setDoc(coachRef, {
-            displayName: name || user.email,
+            displayName: displayName || "iLearn Admin",
             email: user.email,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
@@ -66,7 +74,7 @@ export default function SignupPage() {
     } else {
         // For a regular teacher, create a new coach document and use its ID
         const newCoachRef = await addDoc(collection(firestore, "coaches"), {
-             displayName: name || user.email,
+             displayName: displayName,
              email: user.email,
              createdAt: serverTimestamp(),
              updatedAt: serverTimestamp(),
@@ -75,12 +83,11 @@ export default function SignupPage() {
     }
 
     // Set user document in Firestore
-    const userRef = doc(firestore, "users", user.uid);
     await setDoc(userRef, {
         coachId: coachId,
         role: role,
         profile: {
-            name: name,
+            name: displayName,
             email: user.email,
             photoUrl: user.photoURL || ''
         },
@@ -92,52 +99,55 @@ export default function SignupPage() {
     // Set custom claims using the server-side flow
     const claimsResult = await setUserClaims({
         uid: user.uid,
-        claims: {
-            role: role,
-            coachId: coachId
-        }
+        claims: { role, coachId }
     });
 
     if (!claimsResult.success) {
-      throw new Error(claimsResult.message);
+      throw new Error(`Failed to set custom claims: ${claimsResult.message}`);
     }
   }
 
   const handleGoogleSignup = async () => {
     if(!auth || !firestore) return;
+    setIsLoading(true);
     const provider = new GoogleAuthProvider();
     try {
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
       
-      await createOrUpdateUser(user, user.displayName || '');
-
+      await createOrUpdateUser(user, user.displayName || 'New User');
       await handleLoginSuccess(user);
+
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Signup failed",
         description: error.message,
       });
+    } finally {
+        setIsLoading(false);
     }
   };
 
   const handleEmailSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if(!auth || !firestore) return;
+    setIsLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
       await createOrUpdateUser(user, name);
-
       await handleLoginSuccess(user);
+
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Signup failed",
         description: error.message,
       });
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -155,7 +165,7 @@ export default function SignupPage() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4">
-            <Button variant="outline" className="w-full" onClick={handleGoogleSignup}>
+            <Button variant="outline" className="w-full" onClick={handleGoogleSignup} disabled={isLoading}>
               <GoogleIcon />
               Sign up with Google
             </Button>
@@ -171,18 +181,18 @@ export default function SignupPage() {
             <form className="grid gap-4 mt-4" onSubmit={handleEmailSignup}>
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>
-              <Input id="name" placeholder="Your Name" required value={name} onChange={(e) => setName(e.target.value)} />
+              <Input id="name" placeholder="Your Name" required value={name} onChange={(e) => setName(e.target.value)} disabled={isLoading} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="m@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input id="email" type="email" placeholder="m@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} disabled={isLoading} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} disabled={isLoading}/>
             </div>
-            <Button type="submit" className="w-full bg-accent text-accent-foreground hover:bg-accent/90">
-              Create Account
+            <Button type="submit" className="w-full bg-accent text-accent-foreground hover:bg-accent/90" disabled={isLoading}>
+              {isLoading ? 'Creating Account...' : 'Create Account'}
             </Button>
           </form>
           <div className="mt-4 text-center text-sm">
@@ -196,5 +206,3 @@ export default function SignupPage() {
     </main>
   );
 }
-
-    

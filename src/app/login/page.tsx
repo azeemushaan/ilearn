@@ -6,11 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Logo from "@/components/logo";
-import { useAuth } from "@/firebase";
-import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, User } from "firebase/auth";
+import { useAuth, useFirestore } from "@/firebase";
+import { GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, User, getAuth } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { setUserClaims } from "@/ai/flows/set-user-claims";
 
 const GoogleIcon = () => (
   <svg className="mr-2 h-4 w-4" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512">
@@ -34,13 +36,6 @@ export default function LoginPage() {
     const tokenResult = await user.getIdTokenResult();
     const claims = tokenResult.claims;
 
-    // Debugging Toast: Display the claims
-    toast({
-      title: "User Claims Verified",
-      description: <pre className="mt-2 w-[340px] rounded-md bg-slate-950 p-4"><code className="text-white">{JSON.stringify(claims, null, 2)}</code></pre>,
-      duration: 10000, // Keep toast open longer for debugging
-    });
-
     if (claims.role === 'admin') {
         router.push("/admin/dashboard");
     } else {
@@ -54,7 +49,7 @@ export default function LoginPage() {
     const provider = new GoogleAuthProvider();
     try {
       const userCredential = await signInWithPopup(auth, provider);
-      // NOTE: This assumes a user logging in with Google already exists.
+      // This assumes a user logging in with Google already exists.
       // A more robust flow would check and create the user if they don't.
       await handleLoginSuccess(userCredential.user);
     } catch (error: any) {

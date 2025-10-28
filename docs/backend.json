@@ -1,3 +1,4 @@
+
 {
   "entities": {
     "Coach": {
@@ -28,8 +29,7 @@
           "type": "object",
           "properties": {
             "locale": { "type": "string", "enum": ["en", "ur"] },
-            "lowBandwidthDefault": { "type": "boolean" },
-            "captchaRequired": { "type": "boolean" }
+            "lowBandwidthDefault": { "type": "boolean" }
           }
         },
         "createdAt": { "type": "string", "format": "date-time" },
@@ -53,345 +53,93 @@
           }
         },
         "status": { "type": "string", "enum": ["active", "invited", "disabled"] },
-        "studentMeta": {
-          "type": "object",
-          "properties": {
-            "guardianName": { "type": "string" },
-            "gradeBand": { "type": "string", "enum": ["G1-2", "G3-5", "G6-8"] }
-          }
-        },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["coachId", "role", "profile", "status"]
     },
-    "Invite": {
-      "title": "Invite",
-      "type": "object",
-      "description": "Represents an invitation for a user to join a coach's organization.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "email": { "type": "string", "format": "email" },
-        "role": { "type": "string", "enum": ["admin", "teacher", "student"] },
-        "expiresAt": { "type": "string", "format": "date-time" },
-        "redeemedBy": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["coachId", "email", "role", "expiresAt"]
-    },
-    "Cohort": {
-      "title": "Cohort",
-      "type": "object",
-      "description": "Represents a coach's group or class.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "name": { "type": "string" },
-        "teacherIds": { "type": "array", "items": { "type": "string" } },
-        "memberCount": { "type": "number" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["coachId", "name", "teacherIds", "memberCount"]
-    },
-    "CohortMember": {
-        "title": "Cohort Member",
+    "Plan": {
+        "title": "Plan",
         "type": "object",
-        "description": "Represents a member within a cohort.",
+        "description": "Subscription plan details",
         "properties": {
-            "coachId": { "type": "string" },
-            "cohortId": { "type": "string" },
-            "userId": { "type": "string" },
-            "roleInCohort": { "type": "string", "enum": ["teacher", "student"] },
-            "joinedAt": { "type": "string", "format": "date-time" }
-        },
-        "required": ["coachId", "cohortId", "userId", "roleInCohort", "joinedAt"]
-    },
-    "Playlist": {
-      "title": "Playlist",
-      "type": "object",
-      "description": "Represents a YouTube playlist used for learning.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "title": { "type": "string" },
-        "youtubePlaylistId": { "type": "string" },
-        "assignedCohortIds": { "type": "array", "items": { "type": "string" } },
-        "policy": {
-          "type": "object",
-          "properties": {
-            "minWatchPct": { "type": "number" },
-            "minScore": { "type": "number" },
-            "seekLock": { "type": "boolean" }
-          }
-        },
-        "status": { "type": "string", "enum": ["new", "processing", "ready", "error"] },
-        "createdBy": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["coachId", "title", "youtubePlaylistId", "policy", "status", "createdBy"]
-    },
-    "Video": {
-      "title": "Video",
-      "type": "object",
-      "description": "Represents a video, deduped across a coach's content.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "youtubeVideoId": { "type": "string" },
-        "title": { "type": "string" },
-        "durationSec": { "type": "number" },
-        "hasCaptions": { "type": "boolean" },
-        "chaptersOnly": { "type": "boolean" },
-        "segmentation": {
-            "type": "object",
-            "properties": {
-                "strategy": { "type": "string", "enum": ["captions", "chapters", "manual"]},
-                "chunkAvgSec": { "type": "number" }
-            }
-        },
-        "playlistIds": { "type": "array", "items": { "type": "string" } },
-        "status": { "type": "string", "enum": ["processing", "ready", "error"] },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["coachId", "youtubeVideoId", "title", "durationSec", "hasCaptions", "status"]
-    },
-    "Segment": {
-      "title": "Segment",
-      "type": "object",
-      "description": "Represents a segment of a video for learning.",
-      "properties": {
-        "tStartSec": { "type": "number" },
-        "tEndSec": { "type": "number" },
-        "textChunkHash": { "type": "string" },
-        "summary": { "type": "string" },
-        "difficulty": { "type": "string", "enum": ["E", "M", "H"] },
-        "aiSource": {
-            "type": "object",
-            "properties": {
-                "model": { "type": "string" },
-                "promptVersion": { "type": "string" }
-            }
-        }
-      },
-      "required": ["tStartSec", "tEndSec", "textChunkHash", "difficulty"]
-    },
-    "Question": {
-      "title": "Question",
-      "type": "object",
-      "description": "Represents an AI-generated multiple-choice question for a video segment.",
-      "properties": {
-        "stem": { "type": "string" },
-        "options": { "type": "array", "items": { "type": "string" }, "maxItems": 4, "minItems": 4 },
-        "correctIndex": { "type": "number" },
-        "rationale": { "type": "string" },
-        "tags": { "type": "array", "items": { "type": "string" } },
-        "difficulty": { "type": "string", "enum": ["E", "M", "H"] },
-        "grounding": {
-            "type": "object",
-            "properties": {
-                "quote": { "type": "string" },
-                "offset": { "type": "number" }
-            }
-        },
-        "version": { "type": "number" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["stem", "options", "correctIndex", "difficulty", "version"]
-    },
-    "Assignment": {
-      "title": "Assignment",
-      "type": "object",
-      "description": "Represents the assignment of a playlist to a cohort.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "playlistId": { "type": "string" },
-        "title": { "type": "string" },
-        "cohortId": { "type": "string" },
-        "startAt": { "type": "string", "format": "date-time" },
-        "endAt": { "type": "string", "format": "date-time" },
-        "rules": {
-          "type": "object",
-          "properties": {
-            "minWatchPct": { "type": "number" },
-            "minScore": { "type": "number" },
-            "attemptLimit": { "type": "number" }
-          }
-        },
-        "antiSkip": {
-            "type": "object",
-            "properties": {
-                "seekLock": { "type": "boolean" },
-                "attentionChecks": { "type": "boolean" }
-            }
-        },
-        "status": { "type": "string", "enum": ["draft", "published", "archived"] },
-        "createdBy": { "type": "string" },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "updatedAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["coachId", "playlistId", "title", "cohortId", "rules", "antiSkip", "status", "createdBy"]
-    },
-    "Enrollment": {
-      "title": "Enrollment",
-      "type": "object",
-      "description": "Represents a user's enrollment in an assignment.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "assignmentId": { "type": "string" },
-        "cohortId": { "type": "string" },
-        "userId": { "type": "string" },
-        "role": { "type": "string", "enum": ["student"] },
-        "enrolledAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["coachId", "assignmentId", "cohortId", "userId", "role", "enrolledAt"]
-    },
-    "Attempt": {
-      "title": "Attempt",
-      "type": "object",
-      "description": "Represents a single attempt at a question by a user.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "userId": { "type": "string" },
-        "assignmentId": { "type": "string" },
-        "videoId": { "type": "string" },
-        "segmentId": { "type": "string" },
-        "questionId": { "type": "string" },
-        "chosenIndex": { "type": "number" },
-        "isCorrect": { "type": "boolean" },
-        "latencyMs": { "type": "number" },
-        "ts": { "type": "string", "format": "date-time" },
-        "deviceInfo": {
-            "type": "object",
-            "properties": {
-                "ua": { "type": "string" },
-                "ipCountry": { "type": "string" }
-            }
-        }
-      },
-      "required": ["coachId", "userId", "assignmentId", "videoId", "segmentId", "questionId", "chosenIndex", "isCorrect", "latencyMs", "ts"]
-    },
-    "Progress": {
-      "title": "Progress",
-      "type": "object",
-      "description": "Tracks a student's progress on a video or playlist.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "userId": { "type": "string" },
-        "assignmentId": { "type": "string" },
-        "videoId": { "type": "string" },
-        "watchPct": { "type": "number" },
-        "scorePct": { "type": "number" },
-        "segmentsCompleted": { "type": "number" },
-        "lastEventAt": { "type": "string", "format": "date-time" },
-        "integrity": {
-            "type": "object",
-            "properties": {
-                "seeksForward": { "type": "number" },
-                "tabBlurs": { "type": "number" },
-                "flags": { "type": "array", "items": { "type": "string" } }
-            }
-        }
-      },
-      "required": ["coachId", "userId", "assignmentId", "watchPct", "scorePct", "segmentsCompleted", "lastEventAt"]
-    },
-    "Event": {
-      "title": "Event",
-      "type": "object",
-      "description": "Raw telemetry event for detailed analytics.",
-      "properties": {
-        "coachId": { "type": "string" },
-        "userId": { "type": "string" },
-        "assignmentId": { "type": "string" },
-        "videoId": { "type": "string" },
-        "segmentId": { "type": "string" },
-        "type": { "type": "string", "enum": ["start", "pause", "quizShown", "answer", "seek", "segmentDone", "attention"] },
-        "payload": { "type": "object" },
-        "ts": { "type": "string", "format": "date-time" }
-      },
-      "required": ["coachId", "userId", "type", "ts"]
-    },
-    "Note": {
-        "title": "Note",
-        "type": "object",
-        "description": "A user's note on a video or segment.",
-        "properties": {
-            "coachId": { "type": "string" },
-            "userId": { "type": "string" },
-            "videoId": { "type": "string" },
-            "segmentId": { "type": "string" },
-            "text": { "type": "string" },
-            "ts": { "type": "string", "format": "date-time" }
-        },
-        "required": ["coachId", "userId", "text", "ts"]
-    },
-    "Certificate": {
-        "title": "Certificate",
-        "type": "object",
-        "description": "An issued certificate for a user.",
-        "properties": {
-            "coachId": { "type": "string" },
-            "userId": { "type": "string" },
-            "kind": {"type": "string", "enum": ["MindMaster", "TechStarter", "PlaylistCompletion"]},
-            "payload": {
-                "type": "object",
-                "properties": {
-                    "playlistId": { "type": "string" },
-                    "scorePct": { "type": "number" }
-                }
-            },
-            "issuedAt": { "type": "string", "format": "date-time" }
-        },
-        "required": ["coachId", "userId", "kind", "issuedAt"]
-    },
-    "Resource": {
-        "title": "Resource",
-        "type": "object",
-        "description": "A learning resource like a book or PDF.",
-        "properties": {
-            "coachId": { "type": "string" },
-            "type": { "type": "string", "enum": ["book", "sheet", "promptDeck"] },
             "title": { "type": "string" },
-            "url": { "type": "string", "format": "uri" },
-            "tags": { "type": "array", "items": { "type": "string" } },
-            "gradeBand": { "type": "string", "enum": ["G1-2", "G3-5", "G6-8"] }
+            "tier": { "type": "string", "enum": ["free", "pro", "enterprise"] },
+            "pricePKR": { "type": "number" },
+            "priceUSD": { "type": "number" },
+            "seatLimit": { "type": "number" },
+            "features": { "type": "string" },
+            "isActive": { "type": "boolean" },
+            "sort": { "type": "number" },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "updatedAt": { "type": "string", "format": "date-time" }
         },
-        "required": ["coachId", "type", "title", "url"]
+        "required": ["title", "tier", "pricePKR", "seatLimit", "isActive", "sort"]
     },
     "Subscription": {
         "title": "Subscription",
         "type": "object",
-        "description": "A coach's subscription plan.",
+        "description": "A coach's subscription.",
         "properties": {
             "coachId": { "type": "string" },
+            "planId": { "type": "string" },
             "tier": { "type": "string", "enum": ["free", "pro", "enterprise"] },
             "seatLimit": { "type": "number" },
-            "status": { "type": "string", "enum": ["active", "past_due", "canceled"] },
+            "status": { "type": "string", "enum": ["active", "past_due", "canceled", "awaiting_payment"] },
             "currentPeriodEnd": { "type": "string", "format": "date-time" },
-            "provider": { "type": "string" },
             "createdAt": { "type": "string", "format": "date-time" },
             "updatedAt": { "type": "string", "format": "date-time" }
         },
-        "required": ["coachId", "tier", "seatLimit", "status", "currentPeriodEnd"]
+        "required": ["coachId", "planId", "tier", "seatLimit", "status"]
     },
     "Payment": {
         "title": "Payment",
         "type": "object",
-        "description": "A record of a payment transaction.",
+        "description": "A payment record.",
         "properties": {
             "coachId": { "type": "string" },
-            "userId": { "type": "string" },
             "amount": { "type": "number" },
             "currency": { "type": "string", "enum": ["PKR", "USD"] },
-            "status": { "type": "string", "enum": ["succeeded", "failed", "pending"] },
-            "gatewayRef": { "type": "string" },
-            "ts": { "type": "string", "format": "date-time" }
+            "method": { "type": "string", "enum": ["manual_bank", "card", "waiver"] },
+            "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+            "reference": { "type": "string" },
+            "bankSlipUrl": { "type": "string", "format": "uri" },
+            "notes": { "type": "string" },
+            "reviewedBy": { "type": "string" },
+            "reviewedAt": { "type": "string", "format": "date-time" },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "updatedAt": { "type": "string", "format": "date-time" }
         },
-        "required": ["coachId", "amount", "currency", "status", "gatewayRef", "ts"]
+        "required": ["coachId", "amount", "currency", "method", "status"]
+    },
+    "Invoice": {
+        "title": "Invoice",
+        "type": "object",
+        "description": "An invoice for a coach.",
+        "properties": {
+            "coachId": { "type": "string" },
+            "items": { 
+                "type": "array", 
+                "items": { 
+                    "type": "object",
+                    "properties": {
+                        "label": { "type": "string" },
+                        "amount": { "type": "number" }
+                    }
+                } 
+            },
+            "total": { "type": "number" },
+            "currency": { "type": "string", "enum": ["PKR", "USD"] },
+            "status": { "type": "string", "enum": ["draft", "sent", "paid", "void"] },
+            "dueAt": { "type": "string", "format": "date-time" },
+            "createdAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["coachId", "items", "total", "currency", "status"]
     },
     "Audit": {
         "title": "Audit",
         "type": "object",
-        "description": "An audit log entry for tracking actions.",
+        "description": "An audit log entry.",
         "properties": {
             "coachId": { "type": "string" },
             "actorId": { "type": "string" },
@@ -406,38 +154,40 @@
             "meta": { "type": "object" },
             "ts": { "type": "string", "format": "date-time" }
         },
-        "required": ["coachId", "actorId", "action", "target", "ts"]
+        "required": ["actorId", "action", "target", "ts"]
+    },
+    "TeacherSubscription": {
+        "title": "TeacherSubscription",
+        "type": "object",
+        "description": "Legacy subscription model.",
+        "properties": {
+            "userId": { "type": "string" },
+            "subscriptionPlanId": { "type": "string" },
+            "paymentMethod": { "type": "string" },
+            "transactionId": { "type": "string" },
+            "paymentStatus": { "type": "string" },
+            "createdAt": { "type": "string", "format": "date-time" },
+            "updatedAt": { "type": "string", "format": "date-time" }
+        }
     }
   },
   "auth": {
     "providers": [
-      "password"
+      "password",
+      "google.com"
     ],
     "customClaims": ["role", "coachId"]
   },
   "firestore": {
     "/coaches/{coachId}": { "schema": { "$ref": "#/entities/Coach" }, "description": "Stores details for each coach (tenant)." },
     "/users/{userId}": { "schema": { "$ref": "#/entities/User" }, "description": "Stores all users across all coaches." },
-    "/invites/{inviteId}": { "schema": { "$ref": "#/entities/Invite" }, "description": "Stores user invitations." },
-    "/cohorts/{cohortId}": { "schema": { "$ref": "#/entities/Cohort" }, "description": "Stores coach's classes/groups." },
-    "/cohorts/{cohortId}/members/{userId}": { "schema": { "$ref": "#/entities/CohortMember" }, "description": "Maps users to cohorts." },
-    "/playlists/{playlistId}": { "schema": { "$ref": "#/entities/Playlist" }, "description": "Stores learning playlists." },
-    "/videos/{videoId}": { "schema": { "$ref": "#/entities/Video" }, "description": "Stores video metadata." },
-    "/videos/{videoId}/segments/{segmentId}": { "schema": { "$ref": "#/entities/Segment" }, "description": "Stores video segments." },
-    "/videos/{videoId}/segments/{segmentId}/questions/{questionId}": { "schema": { "$ref": "#/entities/Question" }, "description": "Stores questions for segments." },
-    "/assignments/{assignmentId}": { "schema": { "$ref": "#/entities/Assignment" }, "description": "Stores assignments of playlists to cohorts." },
-    "/enrollments/{enrollmentId}": { "schema": { "$ref": "#/entities/Enrollment" }, "description": "Tracks student enrollment in assignments." },
-    "/attempts/{attemptId}": { "schema": { "$ref": "#/entities/Attempt" }, "description": "Logs student answers to questions." },
-    "/progress/{progressId}": { "schema": { "$ref": "#/entities/Progress" }, "description": "Tracks student progress through assignments." },
-    "/events/{eventId}": { "schema": { "$ref": "#/entities/Event" }, "description": "Raw telemetry events." },
-    "/notes/{noteId}": { "schema": { "$ref": "#/entities/Note" }, "description": "User notes on videos." },
-    "/certificates/{certificateId}": { "schema": { "$ref": "#/entities/Certificate" }, "description": "Issued certificates." },
-    "/resources/{resourceId}": { "schema": { "$ref": "#/entities/Resource" }, "description": "Shared learning resources." },
-    "/subscriptions/{subId}": { "schema": { "$ref": "#/entities/Subscription" }, "description": "Coach subscription details." },
+    "/plans/{planId}": { "schema": { "$ref": "#/entities/Plan" }, "description": "Stores subscription plan details." },
+    "/subscriptions/{subId}": { "schema": { "$ref": "#/entities/Subscription" }, "description": "Stores coach subscription details." },
     "/payments/{paymentId}": { "schema": { "$ref": "#/entities/Payment" }, "description": "Payment transaction records." },
+    "/invoices/{invoiceId}": { "schema": { "$ref": "#/entities/Invoice" }, "description": "Stores invoice details." },
     "/audit/{auditId}": { "schema": { "$ref": "#/entities/Audit" }, "description": "Audit trail for important actions." },
-    "/settings/{coachId}": { "schema": { "$ref": "#/entities/Coach/properties/settings" }, "description": "Mirrored settings for quick client-side reads." }
+    "/settings/theme": { "schema": {}, "description": "Global theme settings." },
+    "/teacher_subscriptions/{id}": { "schema": { "$ref": "#/entities/TeacherSubscription" }, "description": "Legacy subscriptions." },
+    "/subscription_plans/{planId}": { "schema": { "$ref": "#/entities/Plan" }, "description": "Stores subscription plan details (duplicate for pricing page)." }
   }
 }
-
-    
