@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { DependencyList, createContext, useContext, ReactNode, useMemo, useState, useEffect } from 'react';
@@ -47,12 +48,15 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
       return;
     }
 
+    // Set loading to true on mount and when auth object changes.
     setIsLoading(true);
 
     const unsubscribe = onAuthStateChanged(
       auth,
       (firebaseUser) => {
         setUser(firebaseUser);
+        // This is the key change: only set loading to false AFTER the first
+        // onAuthStateChanged callback has fired.
         setIsLoading(false);
         setError(null);
       },
