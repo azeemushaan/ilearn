@@ -2,20 +2,18 @@
 'use client';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { collection, addDoc, serverTimestamp, getDocs, query, where } from "firebase/firestore";
-import { useAuth, useFirestore } from "@/firebase";
+import { collection, getDocs, query, initializeFirestore, getFirestore } from "firebase/firestore";
+import { getApps, initializeApp } from "firebase/app";
+import { firebaseConfig } from "@/firebase/config";
+import { useAuth } from "@/firebase";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getApps, initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
-import { firebaseConfig } from "@/firebase/config";
-
 
 const Pricing = () => {
   const { user } = useAuth();
@@ -80,7 +78,7 @@ const Pricing = () => {
       });
       return;
     }
-    await subscribeToPlan(selectedPlan, "manual_bank", transactionId);
+    await subscribeToPlan(selectedPlan, "manual_bank_transfer", transactionId);
     setSelectedPlan(null);
     setTransactionId("");
   };
@@ -91,7 +89,7 @@ const Pricing = () => {
         return;
     }
     
-    const app = getApps()[0];
+    const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
     try {
@@ -111,26 +109,27 @@ const Pricing = () => {
         });
         return;
       }
-
+      
+      const { addDoc, serverTimestamp, where } = await import('firebase/firestore');
 
       await addDoc(collection(db, 'payments'), {
         coachId: coachId,
         amount: plan.price,
-        currency: 'PKR',
+        currency: 'USD',
         method: method,
         status: method === 'free' ? 'approved' : 'pending',
         reference: reference,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         planId: plan.id,
-        planTitle: plan.title,
+        planTitle: plan.name,
       });
       
       await addDoc(collection(db, 'subscriptions'), {
           coachId: coachId,
           planId: plan.id,
           tier: plan.tier,
-          seatLimit: plan.seatLimit,
+          seatLimit: plan.maxStudents,
           status: method === 'free' ? 'active' : 'awaiting_payment',
           currentPeriodEnd: null,
           createdAt: serverTimestamp(),
@@ -145,7 +144,7 @@ const Pricing = () => {
       } else {
          toast({
             title: "Subscription successful!",
-            description: `You have subscribed to the ${plan.title} plan.`,
+            description: `You have subscribed to the ${plan.name} plan.`,
         });
         router.push('/dashboard');
       }
@@ -159,6 +158,14 @@ const Pricing = () => {
       });
     }
   };
+
+  const Feature = ({ included, text }: { included: boolean; text: string }) => (
+    <li className="flex items-start">
+        {included ? <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" /> : <X className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />}
+        <span className="text-muted-foreground">{text}</span>
+    </li>
+  );
+
 
   return (
     <section id="pricing" className="py-16 md:py-24 bg-secondary/30">
@@ -180,25 +187,26 @@ const Pricing = () => {
                 {plan.tier === "pro" && (
                     <div className="text-sm font-semibold text-accent -mt-2 mb-2">MOST POPULAR</div>
                 )}
-                <CardTitle className="text-2xl font-headline">{plan.name || plan.title}</CardTitle>
+                <CardTitle className="text-2xl font-headline">{plan.name}</CardTitle>
                 <div className="flex items-baseline gap-2">
-                    <span className="text-4xl font-bold">{plan.price === 0 ? 'Free' : `Rs ${plan.price}`}</span>
+                    <span className="text-4xl font-bold">{plan.price === 0 ? 'Free' : `$${plan.price}`}</span>
                     <span className="text-muted-foreground">/ month</span>
                 </div>
-                <CardDescription>{(plan.description || "").split('\n')[0]}</CardDescription>
+                <CardDescription>{plan.description}</CardDescription>
               </CardHeader>
               <CardContent className="flex-1">
                 <ul className="space-y-3">
-                  <li className="flex items-start">
-                    <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <span className="text-muted-foreground">{plan.maxStudents || plan.seatLimit} Teacher Seats</span>
-                  </li>
-                  {(plan.description || "").split('\n').slice(1).filter((f: string) => f.trim() !== '').map((feature: string, index: number) => (
-                       <li key={index} className="flex items-start">
-                           <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                           <span className="text-muted-foreground">{feature.trim()}</span>
-                       </li>
-                  ))}
+                    <li className="flex items-start">
+                        <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                        <span className="text-muted-foreground">{plan.maxStudents} Student Seats</span>
+                    </li>
+                    <li className="flex items-start">
+                        <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
+                        <span className="text-muted-foreground">{plan.maxPlaylists} Playlists</span>
+                    </li>
+                    <Feature included={plan.enableQuizGeneration} text="AI Quiz Generation" />
+                    <Feature included={plan.enableProgressTracking} text="Progress Tracking" />
+                    <Feature included={plan.enableAntiSkip} text="Anti-Skip Controls" />
                 </ul>
               </CardContent>
               <CardFooter>
@@ -218,7 +226,7 @@ const Pricing = () => {
                 <DialogHeader>
                     <DialogTitle>Manual Bank Transfer</DialogTitle>
                     <DialogDescription>
-                        To subscribe to the {selectedPlan?.name || selectedPlan?.title} plan, please transfer Rs {selectedPlan?.price} to the following account:
+                        To subscribe to the {selectedPlan?.name} plan, please transfer ${selectedPlan?.price} to the following account:
                     </DialogDescription>
                 </DialogHeader>
                 <div className="py-4 space-y-4">
