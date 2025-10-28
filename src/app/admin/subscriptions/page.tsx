@@ -41,7 +41,7 @@ export default function PlansPage() {
 
   const plansCollectionRef = useMemoFirebase(() => {
       if(!firestore) return null;
-      return collection(firestore, 'plans');
+      return collection(firestore, 'subscription_plans');
   }, [firestore]);
   
   const { data: plans, isLoading } = useCollection(plansCollectionRef);
@@ -62,7 +62,7 @@ export default function PlansPage() {
   const onSubmit = async (data: PlanFormValues) => {
     if (!firestore) return;
     try {
-      await addDoc(collection(firestore, "plans"), {
+      await addDoc(collection(firestore, "subscription_plans"), {
         ...data,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),

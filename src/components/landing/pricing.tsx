@@ -4,6 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { collection, addDoc, serverTimestamp, getDocs, query, where, getFirestore } from "firebase/firestore";
+import { initializeApp, getApps } from "firebase/app";
+import { firebaseConfig } from "@/firebase/config";
 import { useAuth } from "@/firebase";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
@@ -11,9 +14,6 @@ import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { collection, addDoc, serverTimestamp, getDocs, query, getFirestore } from "firebase/firestore";
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { firebaseConfig } from "@/firebase/config";
 
 const Pricing = () => {
   const { user } = useAuth();
@@ -28,18 +28,17 @@ const Pricing = () => {
     const fetchPlans = async () => {
       setIsLoading(true);
       try {
-        // Standalone initialization for public access
         const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
         const db = getFirestore(app);
         
-        const plansCollectionRef = collection(db, 'plans');
+        const plansCollectionRef = collection(db, 'subscription_plans');
         const q = query(plansCollectionRef);
         const querySnapshot = await getDocs(q);
         
         const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         
         if (plansData.length === 0) {
-            console.log("No plans found in the 'plans' collection.");
+            console.log("No plans found in the 'subscription_plans' collection.");
         }
 
         setPlans(plansData.sort((a, b) => a.sort - b.sort));
@@ -56,14 +55,13 @@ const Pricing = () => {
     };
 
     fetchPlans();
-  }, [toast]);
+  }, []);
 
   const handleChoosePlan = (plan: any) => {
     if (!user) {
       router.push('/signup');
       return;
     }
-    // This part is for logged-in users and should use their authenticated firestore instance
     if (plan.pricePKR > 0) {
       setSelectedPlan(plan);
     } else {
@@ -91,14 +89,12 @@ const Pricing = () => {
         return;
     }
     
-    // Re-initialize to ensure we are using the authenticated instance for writes
     const app = getApps()[0];
     const db = getFirestore(app);
 
     try {
-      const coachId = user.uid; // The logged-in user is the coach
+      const coachId = user.uid; 
 
-      // Check if there's already a subscription awaiting payment
       const subsQuery = query(
         collection(db, 'subscriptions'),
         where('coachId', '==', coachId),
@@ -250,5 +246,3 @@ const Pricing = () => {
 };
 
 export default Pricing;
-
-    

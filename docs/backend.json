@@ -181,7 +181,7 @@
   "firestore": {
     "/coaches/{coachId}": { "schema": { "$ref": "#/entities/Coach" }, "description": "Stores details for each coach (tenant)." },
     "/users/{userId}": { "schema": { "$ref": "#/entities/User" }, "description": "Stores all users across all coaches." },
-    "/plans/{planId}": { "schema": { "$ref": "#/entities/Plan" }, "description": "Stores subscription plan details." },
+    "/subscription_plans/{planId}": { "schema": { "$ref": "#/entities/Plan" }, "description": "Stores subscription plan details." },
     "/subscriptions/{subId}": { "schema": { "$ref": "#/entities/Subscription" }, "description": "Stores coach subscription details." },
     "/payments/{paymentId}": { "schema": { "$ref": "#/entities/Payment" }, "description": "Payment transaction records." },
     "/invoices/{invoiceId}": { "schema": { "$ref": "#/entities/Invoice" }, "description": "Stores invoice details." },
