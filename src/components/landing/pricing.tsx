@@ -1,19 +1,28 @@
+
 'use client';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useFirestore, useUser } from "@/firebase";
-import { collection, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
+import { useUser } from "@/firebase";
+import { collection, addDoc, serverTimestamp, getDocs, query, where, getFirestore } from "firebase/firestore";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { firebaseConfig } from "@/firebase/config";
+import { getApp, getApps, initializeApp } from "firebase/app";
+
+// Helper to initialize Firebase outside of the normal authenticated flow
+const getPublicFirestore = () => {
+    const apps = getApps();
+    const app = apps.length > 0 ? apps[0] : initializeApp(firebaseConfig);
+    return getFirestore(app);
+}
 
 const Pricing = () => {
-  const firestore = useFirestore();
   const { user } = useUser();
   const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
@@ -23,12 +32,14 @@ const Pricing = () => {
 
   useEffect(() => {
     const fetchPlans = async () => {
-      if (!firestore) return;
+      setIsLoading(true);
       try {
-        const plansCollectionRef = collection(firestore, 'plans');
-        const querySnapshot = await getDocs(plansCollectionRef);
+        const db = getPublicFirestore();
+        const plansCollectionRef = collection(db, 'plans');
+        const q = query(plansCollectionRef, where("isActive", "==", true));
+        const querySnapshot = await getDocs(q);
         const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setPlans(plansData);
+        setPlans(plansData.sort((a, b) => a.sort - b.sort));
       } catch (error) {
         console.error("Error fetching plans:", error);
         toast({
@@ -42,7 +53,7 @@ const Pricing = () => {
     };
 
     fetchPlans();
-  }, [firestore]);
+  }, []);
 
   const handleChoosePlan = (plan: any) => {
     if (!user) {
@@ -65,31 +76,34 @@ const Pricing = () => {
       });
       return;
     }
-    await subscribeToPlan(selectedPlan, "manual_bank", transactionId);
+    const firestore = getPublicFirestore();
+    await subscribeToPlan(selectedPlan, "manual_bank", transactionId, firestore);
     setSelectedPlan(null);
     setTransactionId("");
   };
 
-  const subscribeToPlan = async (plan: any, method: string, reference: string) => {
-    if (!firestore || !user) return;
+  const subscribeToPlan = async (plan: any, method: string, reference: string, db?: any) => {
+    const firestore = db || getPublicFirestore();
+    if (!user) return;
 
     try {
-      // As per the new schema, we should create a payment record
       await addDoc(collection(firestore, 'payments'), {
-        coachId: user.uid, // Assuming the user is the coach
+        coachId: user.uid,
         amount: plan.pricePKR,
         currency: 'PKR',
         method: method,
         status: method === 'free' ? 'approved' : 'pending',
         reference: reference,
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        updatedAt: serverTimestamp(),
+        planId: plan.id,
+        planTitle: plan.title,
       });
       
       if (method !== 'free') {
         toast({
             title: "Submission Successful!",
-            description: "Your payment is pending. An admin will approve or reject it within 5 minutes.",
+            description: "Your payment is pending verification. This may take up to 24 hours.",
         });
       } else {
          toast({
@@ -107,7 +121,6 @@ const Pricing = () => {
     }
   };
 
-
   return (
     <section id="pricing" className="py-16 md:py-24 bg-secondary/30">
       <div className="container mx-auto px-4 md:px-6">
@@ -120,8 +133,9 @@ const Pricing = () => {
           </p>
         </div>
         <div className="mt-12 grid gap-8 md:grid-cols-3 items-stretch">
-          {isLoading && <p>Loading plans...</p>}
-          {plans?.filter((p: any) => p.isActive).sort((a: any, b: any) => a.sort - b.sort).map((plan: any) => (
+          {isLoading && <div className="md:col-span-3 text-center"><p>Loading plans...</p></div>}
+          {!isLoading && plans.length === 0 && <div className="md:col-span-3 text-center"><p>No active plans found.</p></div>}
+          {plans.map((plan: any) => (
             <Card key={plan.id} className={cn("flex flex-col shadow-lg", plan.tier === "pro" && "border-accent ring-2 ring-accent")}>
               <CardHeader className="pb-4">
                 {plan.tier === "pro" && (
@@ -132,15 +146,15 @@ const Pricing = () => {
                     <span className="text-4xl font-bold">{plan.pricePKR === 0 ? 'Free' : `Rs ${plan.pricePKR}`}</span>
                     <span className="text-muted-foreground">/ month</span>
                 </div>
-                <CardDescription>{(plan.features || "").split(',')[0]}</CardDescription>
+                <CardDescription>{(plan.features || "").split('\n')[0]}</CardDescription>
               </CardHeader>
               <CardContent className="flex-1">
                 <ul className="space-y-3">
                   <li className="flex items-start">
                     <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <span className="text-muted-foreground">{plan.seatLimit} Seats</span>
+                    <span className="text-muted-foreground">{plan.seatLimit} Teacher Seats</span>
                   </li>
-                  {(plan.features || "").split(',').map((feature: string, index: number) => (
+                  {(plan.features || "").split('\n').filter((f: string) => f.trim() !== '').map((feature: string, index: number) => (
                        <li key={index} className="flex items-start">
                            <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
                            <span className="text-muted-foreground">{feature.trim()}</span>
@@ -194,5 +208,3 @@ const Pricing = () => {
 };
 
 export default Pricing;
-
-    
