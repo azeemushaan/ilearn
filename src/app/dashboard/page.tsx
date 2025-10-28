@@ -1,33 +1,38 @@
 'use client';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useUser, useFirestore, useCollection, useMemoFirebase } from "@/firebase";
+import { useUser, useFirestore, useCollection, useMemoFirebase, useFirebaseAuth } from "@/firebase";
 import { PlusCircle, AlertCircle } from "lucide-react";
 import Link from "next/link";
-import { collection, query, where } from "firebase/firestore";
+import { collection, query, where, doc } from "firebase/firestore";
 
 export default function DashboardPage() {
   const firestore = useFirestore();
-  const { user } = useUser();
+  const { user, claims } = useFirebaseAuth();
 
+  // Query for the user's active subscription in the /subscriptions collection
   const userSubscriptionRef = useMemoFirebase(() => {
-    if (!firestore || !user) return null;
-    return query(collection(firestore, "teacher_subscriptions"), where("userId", "==", user.uid), where("paymentStatus", "==", "approved"));
-  }, [firestore, user]);
+    if (!firestore || !claims?.coachId) return null;
+    return query(
+      collection(firestore, "subscriptions"), 
+      where("coachId", "==", claims.coachId),
+      where("status", "==", "active")
+    );
+  }, [firestore, claims]);
 
   const { data: subscriptions } = useCollection(userSubscriptionRef);
+  const activeSubscription = subscriptions?.[0];
 
-  const planId = subscriptions?.[0]?.subscriptionPlanId;
+  // Get the details of the plan from the /plans collection
+  const planDocRef = useMemoFirebase(() => {
+    if(!firestore || !activeSubscription?.planId) return null;
+    return doc(firestore, "plans", activeSubscription.planId);
+  }, [firestore, activeSubscription]);
 
-  const planRef = useMemoFirebase(() => {
-    if(!firestore || !planId) return null;
-    return query(collection(firestore, "subscription_plans"), where("id", "==", planId));
-  }, [firestore, planId]);
+  const { data: currentPlan } = useCollection(planDocRef as any);
 
-  const { data: plans } = useCollection(planRef);
-  const currentPlan = plans?.[0];
-
-  const canCreatePlaylist = currentPlan ? (currentPlan.maxPlaylists > 0) : false; // Example logic
+  // A user can create a playlist if they have an active subscription with a seat limit > 0
+  const canCreatePlaylist = activeSubscription ? activeSubscription.seatLimit > 0 : false;
 
 
   return (
@@ -45,7 +50,7 @@ export default function DashboardPage() {
       </header>
       <main className="flex-1 p-4 md:p-6">
         <div className="grid gap-6">
-            {!currentPlan && subscriptions?.length === 0 && (
+            {!activeSubscription && (
               <Card className="bg-yellow-50 border-yellow-200">
                 <CardHeader className="flex flex-row items-center gap-4">
                   <AlertCircle className="h-6 w-6 text-yellow-600" />
