@@ -5,7 +5,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser } from "@/firebase";
-import { collection, addDoc, serverTimestamp, getDocs, query, where, getFirestore } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, getDocs, query, getFirestore } from "firebase/firestore";
+import { getApp, getApps, initializeApp } from "firebase/app";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -13,7 +14,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { firebaseConfig } from "@/firebase/config";
-import { getApp, getApps, initializeApp } from "firebase/app";
 
 // Helper to initialize Firebase outside of the normal authenticated flow
 const getPublicFirestore = () => {
@@ -36,7 +36,8 @@ const Pricing = () => {
       try {
         const db = getPublicFirestore();
         const plansCollectionRef = collection(db, 'plans');
-        const q = query(plansCollectionRef, where("isActive", "==", true));
+        // Fetch ALL plans, not just active ones.
+        const q = query(plansCollectionRef);
         const querySnapshot = await getDocs(q);
         const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setPlans(plansData.sort((a, b) => a.sort - b.sort));
@@ -134,7 +135,7 @@ const Pricing = () => {
         </div>
         <div className="mt-12 grid gap-8 md:grid-cols-3 items-stretch">
           {isLoading && <div className="md:col-span-3 text-center"><p>Loading plans...</p></div>}
-          {!isLoading && plans.length === 0 && <div className="md:col-span-3 text-center"><p>No active plans found.</p></div>}
+          {!isLoading && plans.length === 0 && <div className="md:col-span-3 text-center"><p>No plans found.</p></div>}
           {plans.map((plan: any) => (
             <Card key={plan.id} className={cn("flex flex-col shadow-lg", plan.tier === "pro" && "border-accent ring-2 ring-accent")}>
               <CardHeader className="pb-4">
