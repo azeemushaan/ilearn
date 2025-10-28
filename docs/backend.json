@@ -187,7 +187,6 @@
     "/invoices/{invoiceId}": { "schema": { "$ref": "#/entities/Invoice" }, "description": "Stores invoice details." },
     "/audit/{auditId}": { "schema": { "$ref": "#/entities/Audit" }, "description": "Audit trail for important actions." },
     "/settings/theme": { "schema": {}, "description": "Global theme settings." },
-    "/teacher_subscriptions/{id}": { "schema": { "$ref": "#/entities/TeacherSubscription" }, "description": "Legacy subscriptions." },
-    "/subscription_plans/{planId}": { "schema": { "$ref": "#/entities/Plan" }, "description": "Stores subscription plan details (duplicate for pricing page)." }
+    "/teacher_subscriptions/{id}": { "schema": { "$ref": "#/entities/TeacherSubscription" }, "description": "Legacy subscriptions." }
   }
 }

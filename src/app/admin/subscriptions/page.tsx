@@ -1,7 +1,7 @@
 'use client';
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { PlusCircle } from "lucide-react";
 import {
   Dialog,
@@ -24,25 +24,24 @@ import { toast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 
 const planSchema = z.object({
-  name: z.string().min(1, "Plan name is required"),
-  description: z.string().min(1, "Description is required"),
-  price: z.preprocess((a) => parseFloat(z.string().parse(a)), z.number().min(0)),
-  maxStudents: z.preprocess((a) => parseInt(z.string().parse(a), 10), z.number().int().min(0)),
-  maxPlaylists: z.preprocess((a) => parseInt(z.string().parse(a), 10), z.number().int().min(0)),
-  enableQuizGeneration: z.boolean().default(false),
-  enableProgressTracking: z.boolean().default(false),
-  enableAntiSkip: z.boolean().default(false),
+  title: z.string().min(1, "Plan name is required"),
+  features: z.string().min(1, "Description is required"),
+  pricePKR: z.preprocess((a) => parseFloat(z.string().parse(a)), z.number().min(0)),
+  seatLimit: z.preprocess((a) => parseInt(z.string().parse(a), 10), z.number().int().min(0)),
+  tier: z.enum(["free", "pro", "enterprise"]),
+  sort: z.preprocess((a) => parseInt(z.string().parse(a), 10), z.number().int()),
+  isActive: z.boolean().default(true),
 });
 
 type PlanFormValues = z.infer<typeof planSchema>;
 
-export default function SubscriptionsPage() {
+export default function PlansPage() {
   const firestore = useFirestore();
   const [open, setOpen] = React.useState(false);
 
   const plansCollectionRef = useMemoFirebase(() => {
       if(!firestore) return null;
-      return collection(firestore, 'subscription_plans');
+      return collection(firestore, 'plans');
   }, [firestore]);
   
   const { data: plans, isLoading } = useCollection(plansCollectionRef);
@@ -50,21 +49,20 @@ export default function SubscriptionsPage() {
   const { register, handleSubmit, control, reset, formState: { errors } } = useForm<PlanFormValues>({
     resolver: zodResolver(planSchema),
     defaultValues: {
-        name: "",
-        description: "",
-        price: 0,
-        maxStudents: 0,
-        maxPlaylists: 0,
-        enableQuizGeneration: false,
-        enableProgressTracking: false,
-        enableAntiSkip: false,
+        title: "",
+        features: "",
+        pricePKR: 0,
+        seatLimit: 1,
+        tier: "free",
+        sort: 1,
+        isActive: true,
     }
   });
 
   const onSubmit = async (data: PlanFormValues) => {
     if (!firestore) return;
     try {
-      await addDoc(collection(firestore, "subscription_plans"), {
+      await addDoc(collection(firestore, "plans"), {
         ...data,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -88,7 +86,7 @@ export default function SubscriptionsPage() {
     <div className="flex flex-1 flex-col">
       <header className="p-4 md:p-6 border-b">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-headline font-bold">Subscription Plans</h1>
+          <h1 className="text-2xl font-headline font-bold">Plans</h1>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button className="bg-accent text-accent-foreground hover:bg-accent/90">
@@ -98,7 +96,7 @@ export default function SubscriptionsPage() {
             </DialogTrigger>
             <DialogContent className="sm:max-w-[425px]">
               <DialogHeader>
-                <DialogTitle>Create New Subscription Plan</DialogTitle>
+                <DialogTitle>Create New Plan</DialogTitle>
                 <DialogDescription>
                   Fill out the details for the new plan.
                 </DialogDescription>
@@ -106,68 +104,46 @@ export default function SubscriptionsPage() {
               <form onSubmit={handleSubmit(onSubmit)}>
                 <div className="grid gap-4 py-4">
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="name" className="text-right">Name</Label>
-                    <Input id="name" {...register("name")} className="col-span-3" />
-                    {errors.name && <p className="col-span-4 text-red-500 text-sm text-right">{errors.name.message}</p>}
+                    <Label htmlFor="title" className="text-right">Name</Label>
+                    <Input id="title" {...register("title")} className="col-span-3" />
+                    {errors.title && <p className="col-span-4 text-red-500 text-sm text-right">{errors.title.message}</p>}
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="description" className="text-right">Description</Label>
-                    <Input id="description" {...register("description")} className="col-span-3" />
-                     {errors.description && <p className="col-span-4 text-red-500 text-sm text-right">{errors.description.message}</p>}
+                    <Label htmlFor="features" className="text-right">Features</Label>
+                    <Input id="features" {...register("features")} className="col-span-3" placeholder="One feature per line" />
+                     {errors.features && <p className="col-span-4 text-red-500 text-sm text-right">{errors.features.message}</p>}
+                  </div>
+                   <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="pricePKR" className="text-right">Price (PKR)</Label>
+                    <Input id="pricePKR" type="number" {...register("pricePKR")} className="col-span-3" />
+                     {errors.pricePKR && <p className="col-span-4 text-red-500 text-sm text-right">{errors.pricePKR.message}</p>}
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="price" className="text-right">Price</Label>
-                    <Input id="price" type="number" {...register("price")} className="col-span-3" />
-                     {errors.price && <p className="col-span-4 text-red-500 text-sm text-right">{errors.price.message}</p>}
+                    <Label htmlFor="seatLimit" className="text-right">Seat Limit</Label>
+                    <Input id="seatLimit" type="number" {...register("seatLimit")} className="col-span-3" />
+                     {errors.seatLimit && <p className="col-span-4 text-red-500 text-sm text-right">{errors.seatLimit.message}</p>}
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="maxStudents" className="text-right">Max Students</Label>
-                    <Input id="maxStudents" type="number" {...register("maxStudents")} className="col-span-3" />
-                     {errors.maxStudents && <p className="col-span-4 text-red-500 text-sm text-right">{errors.maxStudents.message}</p>}
+                    <Label htmlFor="tier" className="text-right">Tier</Label>
+                    <select id="tier" {...register("tier")} className="col-span-3 border p-2 rounded-md">
+                        <option value="free">Free</option>
+                        <option value="pro">Pro</option>
+                        <option value="enterprise">Enterprise</option>
+                    </select>
                   </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="maxPlaylists" className="text-right">Max Playlists</Label>
-                    <Input id="maxPlaylists" type="number" {...register("maxPlaylists")} className="col-span-3" />
-                     {errors.maxPlaylists && <p className="col-span-4 text-red-500 text-sm text-right">{errors.maxPlaylists.message}</p>}
+                   <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="sort" className="text-right">Sort Order</Label>
+                    <Input id="sort" type="number" {...register("sort")} className="col-span-3" />
+                     {errors.sort && <p className="col-span-4 text-red-500 text-sm text-right">{errors.sort.message}</p>}
                   </div>
                    <div className="grid grid-cols-2 items-center gap-4 px-3 py-2 rounded-md border">
-                     <Label htmlFor="enableQuizGeneration">Quiz Generation</Label>
+                     <Label htmlFor="isActive">Active</Label>
                     <Controller
                       control={control}
-                      name="enableQuizGeneration"
+                      name="isActive"
                       render={({ field }) => (
                         <Switch
-                          id="enableQuizGeneration"
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                          className="ml-auto"
-                        />
-                      )}
-                    />
-                  </div>
-                   <div className="grid grid-cols-2 items-center gap-4 px-3 py-2 rounded-md border">
-                     <Label htmlFor="enableProgressTracking">Progress Tracking</Label>
-                     <Controller
-                      control={control}
-                      name="enableProgressTracking"
-                      render={({ field }) => (
-                        <Switch
-                          id="enableProgressTracking"
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                          className="ml-auto"
-                        />
-                      )}
-                    />
-                  </div>
-                   <div className="grid grid-cols-2 items-center gap-4 px-3 py-2 rounded-md border">
-                     <Label htmlFor="enableAntiSkip">Anti-Skip Feature</Label>
-                     <Controller
-                      control={control}
-                      name="enableAntiSkip"
-                      render={({ field }) => (
-                        <Switch
-                          id="enableAntiSkip"
+                          id="isActive"
                           checked={field.value}
                           onCheckedChange={field.onChange}
                           className="ml-auto"
@@ -194,32 +170,32 @@ export default function SubscriptionsPage() {
                 <Card key={plan.id}>
                   <CardHeader>
                     <CardTitle className="flex justify-between items-center">
-                        {plan.name}
-                        <Badge variant={plan.price === 0 ? "secondary" : "default"}>
-                            {plan.price === 0 ? 'Free' : `$${plan.price}`}
+                        {plan.title}
+                        <Badge variant={plan.pricePKR === 0 ? "secondary" : "default"}>
+                            {plan.pricePKR === 0 ? 'Free' : `Rs ${plan.pricePKR}`}
                         </Badge>
                     </CardTitle>
-                    <CardDescription>{plan.description}</CardDescription>
+                     <CardDescription>{(plan.features || "").split('\n')[0]}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <div>
-                        <p className="font-semibold">Limits:</p>
-                        <ul className="list-disc list-inside text-muted-foreground text-sm">
-                            <li>{plan.maxStudents} Students</li>
-                            <li>{plan.maxPlaylists} Playlists</li>
-                        </ul>
-                    </div>
-                    <div>
-                        <p className="font-semibold">Features:</p>
-                         <ul className="list-disc list-inside text-muted-foreground text-sm">
-                            <li>Quiz Generation: {plan.enableQuizGeneration ? "✅" : "❌"}</li>
-                            <li>Progress Tracking: {plan.enableProgressTracking ? "✅" : "❌"}</li>
-                            <li>Anti-Skip Controls: {plan.enableAntiSkip ? "✅" : "❌"}</li>
-                        </ul>
-                    </div>
+                     <ul className="list-disc list-inside text-muted-foreground text-sm space-y-1">
+                        <li>{plan.seatLimit} Teacher Seat(s)</li>
+                       {(plan.features || "").split('\n').slice(1).map((feature: string, index: number) => (
+                           <li key={index}>{feature}</li>
+                       ))}
+                    </ul>
                   </CardContent>
+                  <CardFooter>
+                      <Badge variant={plan.isActive ? "default" : "destructive"}>{plan.isActive ? 'Active' : 'Inactive'}</Badge>
+                      <span className="text-xs text-muted-foreground ml-auto">Sort: {plan.sort}</span>
+                  </CardFooter>
                 </Card>
               ))}
+               {plans?.length === 0 && !isLoading && (
+                    <div className="md:col-span-3 text-center py-10">
+                        <p>No plans found. Create one to get started.</p>
+                    </div>
+               )}
             </div>
           )}
         </div>
