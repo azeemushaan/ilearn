@@ -1,7 +1,7 @@
 'use client';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFirestore, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, addDoc, serverTimestamp, doc } from "firebase/firestore";
@@ -122,16 +122,16 @@ const Pricing = () => {
                     <span className="text-muted-foreground">{plan.maxStudents} Students</span>
                   </li>
                   <li className="flex items-start">
-                    <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <span className="text-muted-foreground">Quiz Generation: {plan.enableQuizGeneration ? '✅' : '❌'}</span>
+                    {plan.enableQuizGeneration ? <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" /> : <X className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />}
+                    <span className="text-muted-foreground">Quiz Generation</span>
                   </li>
                    <li className="flex items-start">
-                    <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <span className="text-muted-foreground">Progress Tracking: {plan.enableProgressTracking ? '✅' : '❌'}</span>
+                    {plan.enableProgressTracking ? <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" /> : <X className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />}
+                    <span className="text-muted-foreground">Progress Tracking</span>
                   </li>
                   <li className="flex items-start">
-                    <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" />
-                    <span className="text-muted-foreground">Anti-Skip Controls: {plan.enableAntiSkip ? '✅' : '❌'}</span>
+                    {plan.enableAntiSkip ? <Check className="h-5 w-5 text-green-500 mr-2 flex-shrink-0 mt-0.5" /> : <X className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />}
+                    <span className="text-muted-foreground">Anti-Skip Controls</span>
                   </li>
                 </ul>
               </CardContent>
