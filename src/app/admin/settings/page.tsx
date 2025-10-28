@@ -124,6 +124,13 @@ export default function SettingsPage() {
   useEffect(() => {
     if (themeData) {
       reset(themeData as any);
+      // Apply theme to the document
+      const root = document.documentElement;
+      Object.entries(themeData).forEach(([key, value]) => {
+          if(key !== 'id') {
+              root.style.setProperty(`--${key}`, value as string);
+          }
+      });
     }
   }, [themeData, reset]);
 
