@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth } from "@/firebase";
-import { collection, addDoc, serverTimestamp, query, where } from "firebase/firestore";
+import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth, useDoc } from "@/firebase";
+import { collection, addDoc, serverTimestamp, query, where, doc, updateDoc } from "firebase/firestore";
 import { toast } from "@/hooks/use-toast";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const SubscriptionPage = () => {
-  const { claims, initializing, loadingClaims } = useFirebaseAuth();
+  const { user, claims, initializing, loadingClaims } = useFirebaseAuth();
   const router = useRouter();
   const firestore = useFirestore();
 
@@ -22,27 +22,36 @@ const SubscriptionPage = () => {
   const [transactionId, setTransactionId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const userDocRef = useMemoFirebase(() => {
+    if (!firestore || !user) return null;
+    return doc(firestore, "users", user.uid);
+  }, [firestore, user]);
+
+  const { data: userProfile } = useDoc(userDocRef as any);
+
+  const coachId = claims?.coachId || (userProfile as any)?.coachId;
+
   const plansCollectionRef = useMemoFirebase(() => {
     if (!firestore) return null;
     return collection(firestore, 'subscription_plans');
   }, [firestore]);
-  
+
   const { data: plans, isLoading: isLoadingPlans } = useCollection(plansCollectionRef);
 
   const userSubscriptionRef = useMemoFirebase(() => {
-    if (!firestore || !claims?.coachId) return null;
-    return query(collection(firestore, "subscriptions"), where("coachId", "==", claims.coachId), where("status", "in", ["active", "awaiting_payment"]));
-  }, [firestore, claims]);
+    if (!firestore || !coachId) return null;
+    return query(collection(firestore, "subscriptions"), where("coachId", "==", coachId), where("status", "in", ["active", "awaiting_payment"]));
+  }, [firestore, coachId]);
 
   const { data: subscriptions, isLoading: isLoadingSubs } = useCollection(userSubscriptionRef);
   const currentSubscription = subscriptions?.[0];
 
   const handleChoosePlan = (plan: any) => {
-    if (!claims?.coachId) {
+    if (!coachId) {
       toast({ variant: "destructive", title: "You must be logged in to subscribe."});
       return;
     }
-    
+
     const isFree = (plan.priceUSD === 0 && plan.pricePKR === 0);
     if (isFree) {
         subscribeToPlan(plan, "free", "");
@@ -68,11 +77,11 @@ const SubscriptionPage = () => {
   };
 
   const subscribeToPlan = async (plan: any, method: string, reference: string) => {
-    if (!claims?.coachId || !firestore) {
+    if (!coachId || !firestore) {
         toast({ variant: "destructive", title: "Authentication error. Please refresh and try again."});
         return;
     }
-    
+
     if (currentSubscription) {
         toast({
             title: "Existing Subscription Found",
@@ -82,13 +91,28 @@ const SubscriptionPage = () => {
     }
 
     try {
-      const coachId = claims.coachId;
       const amount = plan.currency === 'USD' ? plan.priceUSD : plan.pricePKR;
       const isFree = method === 'free';
 
-      // Create a payment record
-      await addDoc(collection(firestore, 'payments'), {
+      const subscriptionsCollection = collection(firestore, 'subscriptions');
+      const transactionsCollection = collection(firestore, 'transactions');
+
+      // Create the subscription record first to get a reference ID
+      const subscriptionDocRef = await addDoc(subscriptionsCollection, {
+          coachId: coachId,
+          planId: plan.id,
+          tier: plan.tier,
+          seatLimit: plan.maxStudents,
+          status: isFree ? 'active' : 'awaiting_payment',
+          currentPeriodEnd: null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+      });
+
+      // Create a transaction record that references the subscription
+      const transactionDocRef = await addDoc(transactionsCollection, {
         coachId: coachId,
+        subscriptionId: subscriptionDocRef.id,
         amount: amount,
         currency: plan.currency,
         method: method,
@@ -99,24 +123,17 @@ const SubscriptionPage = () => {
         planId: plan.id,
         planTitle: plan.name,
       });
-      
-      // Create the subscription record
-      await addDoc(collection(firestore, 'subscriptions'), {
-          coachId: coachId,
-          planId: plan.id,
-          tier: plan.tier,
-          seatLimit: plan.maxStudents,
-          status: isFree ? 'active' : 'awaiting_payment',
-          currentPeriodEnd: null,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+
+      await updateDoc(subscriptionDocRef, {
+        transactionId: transactionDocRef.id,
+        updatedAt: serverTimestamp(),
       });
-      
+
       if (!isFree) {
         toast({
-            title: "Submission Successful!",
-            description: "Your payment is pending verification. This may take up to 5 minutes.",
-            variant: 'default', // Using default for green-ish tint or neutral look
+            title: "Payment Submitted",
+            description: "Admin will approve or reject your payment within 5 minutes.",
+            className: "border-green-500 bg-green-50 text-green-900",
         });
       } else {
          toast({

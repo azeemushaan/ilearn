@@ -18,19 +18,27 @@ export default function PaymentsPage() {
 
     const paymentsCollectionRef = useMemoFirebase(() => {
         if(!firestore) return null;
-        return collection(firestore, 'teacher_subscriptions');
+        return collection(firestore, 'transactions');
     }, [firestore]);
 
     const { data: payments, isLoading } = useCollection(paymentsCollectionRef);
 
-    const handleApprove = async (id: string) => {
+    const handleApprove = async (payment: any) => {
         if (!firestore) return;
-        const paymentRef = doc(firestore, "teacher_subscriptions", id);
+        const paymentRef = doc(firestore, "transactions", payment.id);
         try {
             await updateDoc(paymentRef, {
-                paymentStatus: 'approved',
+                status: 'approved',
                 updatedAt: serverTimestamp(),
             });
+
+            if (payment.subscriptionId) {
+                const subscriptionRef = doc(firestore, "subscriptions", payment.subscriptionId);
+                await updateDoc(subscriptionRef, {
+                    status: 'active',
+                    updatedAt: serverTimestamp(),
+                });
+            }
             toast({
                 title: "Payment Approved",
                 description: "The payment has been marked as approved.",
@@ -44,14 +52,22 @@ export default function PaymentsPage() {
         }
     };
     
-    const handleReject = async (id: string) => {
+    const handleReject = async (payment: any) => {
         if (!firestore) return;
-        const paymentRef = doc(firestore, "teacher_subscriptions", id);
+        const paymentRef = doc(firestore, "transactions", payment.id);
         try {
             await updateDoc(paymentRef, {
-                paymentStatus: 'rejected',
+                status: 'rejected',
                 updatedAt: serverTimestamp(),
             });
+
+            if (payment.subscriptionId) {
+                const subscriptionRef = doc(firestore, "subscriptions", payment.subscriptionId);
+                await updateDoc(subscriptionRef, {
+                    status: 'cancelled',
+                    updatedAt: serverTimestamp(),
+                });
+            }
             toast({
                 title: "Payment Rejected",
                 description: "The payment has been marked as rejected.",
@@ -65,7 +81,7 @@ export default function PaymentsPage() {
         }
     };
 
-    const manualTransfers = payments?.filter((p: any) => p.paymentMethod === 'manual_bank_transfer');
+    const manualTransfers = payments?.filter((p: any) => p.method === 'manual_bank_transfer');
 
     return (
         <div className="flex flex-1 flex-col">
@@ -80,8 +96,9 @@ export default function PaymentsPage() {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                        <TableHead>Teacher ID</TableHead>
-                        <TableHead>Transaction ID</TableHead>
+                        <TableHead>Coach ID</TableHead>
+                        <TableHead>Plan</TableHead>
+                        <TableHead>Reference</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
@@ -89,22 +106,23 @@ export default function PaymentsPage() {
                     <TableBody>
                         {manualTransfers?.map((payment: any) => (
                             <TableRow key={payment.id}>
-                                <TableCell className="font-mono text-sm">{payment.userId}</TableCell>
-                                <TableCell>{payment.transactionId}</TableCell>
+                                <TableCell className="font-mono text-sm">{payment.coachId}</TableCell>
+                                <TableCell>{payment.planTitle}</TableCell>
+                                <TableCell>{payment.reference || '—'}</TableCell>
                                 <TableCell>
                                     <Badge variant={
-                                        payment.paymentStatus === 'approved' ? 'default' 
-                                        : payment.paymentStatus === 'rejected' ? 'destructive' 
+                                        payment.status === 'approved' ? 'default'
+                                        : payment.status === 'rejected' ? 'destructive'
                                         : 'secondary'
                                     }>
-                                        {payment.paymentStatus}
+                                        {payment.status}
                                     </Badge>
                                 </TableCell>
                                 <TableCell className="text-right">
-                                    {payment.paymentStatus === 'pending' && (
+                                    {payment.status === 'pending' && (
                                         <div className="flex gap-2 justify-end">
-                                            <Button size="sm" onClick={() => handleApprove(payment.id)}>Approve</Button>
-                                            <Button size="sm" variant="destructive" onClick={() => handleReject(payment.id)}>Reject</Button>
+                                            <Button size="sm" onClick={() => handleApprove(payment)}>Approve</Button>
+                                            <Button size="sm" variant="destructive" onClick={() => handleReject(payment)}>Reject</Button>
                                         </div>
                                     )}
                                 </TableCell>
@@ -112,7 +130,7 @@ export default function PaymentsPage() {
                         ))}
                          {manualTransfers?.length === 0 && (
                             <TableRow>
-                                <TableCell colSpan={4} className="text-center">No pending manual payments.</TableCell>
+                                <TableCell colSpan={5} className="text-center">No pending manual payments.</TableCell>
                             </TableRow>
                          )}
                     </TableBody>

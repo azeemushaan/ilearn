@@ -94,15 +94,15 @@ service cloud.firestore {
     }
 
     /**
-     * @description Restricts access to payments to authenticated users with the correct coachId.
-     * @path /payments/{paymentId}
+     * @description Restricts access to transactions to authenticated users with the correct coachId.
+     * @path /transactions/{transactionId}
      * @allow get, list: if isSignedIn(); // TODO: Refine to allow only coach or admin.
      * @allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
      * @allow update: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
      * @allow delete: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
-     * @principle Enforces payment access control.
+     * @principle Enforces transaction access control.
      */
-    match /payments/{paymentId} {
+    match /transactions/{transactionId} {
       allow get, list: if isSignedIn(); // TODO: Refine to allow only coach or admin.
       allow create: if isSignedIn(); // TODO: Add role-based access and coachId validation.
       allow update: if isSignedIn() && resource != null; // TODO: Add role-based access and coachId validation.
