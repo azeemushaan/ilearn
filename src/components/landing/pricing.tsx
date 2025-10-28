@@ -4,27 +4,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useUser } from "@/firebase";
-import { collection, addDoc, serverTimestamp, getDocs, query, getFirestore } from "firebase/firestore";
-import { getApp, getApps, initializeApp } from "firebase/app";
+import { useUser, useFirestore, useFirebaseAuth } from "@/firebase";
+import { collection, addDoc, serverTimestamp, getDocs, query, where } from "firebase/firestore";
 import { toast } from "@/hooks/use-toast";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { firebaseConfig } from "@/firebase/config";
-
-// Helper to initialize Firebase outside of the normal authenticated flow
-const getPublicFirestore = () => {
-    const apps = getApps();
-    const app = apps.length > 0 ? apps[0] : initializeApp(firebaseConfig);
-    return getFirestore(app);
-}
 
 const Pricing = () => {
-  const { user } = useUser();
+  const { user } = useFirebaseAuth();
+  const firestore = useFirestore();
   const router = useRouter();
+
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [transactionId, setTransactionId] = useState("");
   const [plans, setPlans] = useState<any[]>([]);
@@ -32,11 +25,13 @@ const Pricing = () => {
 
   useEffect(() => {
     const fetchPlans = async () => {
+      if (!firestore) {
+        console.log("Firestore not ready, skipping fetch.");
+        return;
+      };
       setIsLoading(true);
       try {
-        const db = getPublicFirestore();
-        const plansCollectionRef = collection(db, 'plans');
-        // Fetch ALL plans, not just active ones.
+        const plansCollectionRef = collection(firestore, 'plans');
         const q = query(plansCollectionRef);
         const querySnapshot = await getDocs(q);
         const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -54,7 +49,7 @@ const Pricing = () => {
     };
 
     fetchPlans();
-  }, []);
+  }, [firestore]);
 
   const handleChoosePlan = (plan: any) => {
     if (!user) {
@@ -77,19 +72,17 @@ const Pricing = () => {
       });
       return;
     }
-    const firestore = getPublicFirestore();
-    await subscribeToPlan(selectedPlan, "manual_bank", transactionId, firestore);
+    await subscribeToPlan(selectedPlan, "manual_bank", transactionId);
     setSelectedPlan(null);
     setTransactionId("");
   };
 
-  const subscribeToPlan = async (plan: any, method: string, reference: string, db?: any) => {
-    const firestore = db || getPublicFirestore();
-    if (!user) return;
+  const subscribeToPlan = async (plan: any, method: string, reference: string) => {
+    if (!firestore || !user) return;
 
     try {
       await addDoc(collection(firestore, 'payments'), {
-        coachId: user.uid,
+        coachId: user.uid, // Use the logged-in user's UID as the coachId
         amount: plan.pricePKR,
         currency: 'PKR',
         method: method,
@@ -99,6 +92,18 @@ const Pricing = () => {
         updatedAt: serverTimestamp(),
         planId: plan.id,
         planTitle: plan.title,
+      });
+      
+      // Also create a subscription document
+      await addDoc(collection(firestore, 'subscriptions'), {
+          coachId: user.uid,
+          planId: plan.id,
+          tier: plan.tier,
+          seatLimit: plan.seatLimit,
+          status: method === 'free' ? 'active' : 'awaiting_payment',
+          currentPeriodEnd: null,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
       });
       
       if (method !== 'free') {
@@ -111,9 +116,11 @@ const Pricing = () => {
             title: "Subscription successful!",
             description: `You have subscribed to the ${plan.title} plan.`,
         });
+        router.push('/dashboard');
       }
 
     } catch (error: any) {
+      console.error("Error subscribing to plan:", error);
       toast({
         variant: "destructive",
         title: "Subscription failed",
@@ -167,6 +174,7 @@ const Pricing = () => {
                 <Button 
                   className={cn("w-full", plan.tier === "pro" ? "bg-accent text-accent-foreground hover:bg-accent/90" : "bg-primary text-primary-foreground hover:bg-primary/90")}
                   onClick={() => handleChoosePlan(plan)}
+                  disabled={isLoading}
                 >
                   Choose Plan
                 </Button>
