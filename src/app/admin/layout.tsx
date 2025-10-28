@@ -36,17 +36,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { user, claims, initializing, loadingClaims } = useFirebaseAuth();
   const redirected = useRef(false);
 
-  // If we are on the login page, don't apply any of the auth logic.
-  if (pathname === '/admin/login') {
-    return <>{children}</>;
-  }
-
+  const onLoginPage = pathname === '/admin/login';
   const ready = !initializing && (user ? !loadingClaims : true);
   const isAdmin = !!(claims && claims.role === 'admin');
 
   useEffect(() => {
-    if (!ready || redirected.current) {
-        return;
+    // This effect should not run on the login page.
+    if (onLoginPage || redirected.current || !ready) {
+      return;
     }
 
     if (!user) {
@@ -61,21 +58,29 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       return;
     }
 
-  }, [ready, user, isAdmin, router]);
+  }, [ready, user, isAdmin, router, onLoginPage]);
+
+  // If on the login page, just render the content.
+  if (onLoginPage) {
+    return <>{children}</>;
+  }
+
+  // While checking auth state, show a loading indicator.
+  if (!ready) {
+    return <div className="flex h-screen w-full items-center justify-center">Loading Admin Portal…</div>;
+  }
+  
+  // If we're ready but the user isn't an admin, they are being redirected. Render null to avoid flicker.
+  if (!isAdmin) {
+    return null;
+  }
 
   const handleLogout = async () => {
     await auth.signOut();
     router.push('/admin/login');
   };
-
-  if (!ready) {
-    return <div className="flex h-screen w-full items-center justify-center">Loading Admin Portal…</div>;
-  }
-
-  if (!isAdmin) {
-      return null;
-  }
   
+  // If we are here, user is an admin. Render the full dashboard layout.
   return (
     <SidebarProvider>
       <Sidebar>
