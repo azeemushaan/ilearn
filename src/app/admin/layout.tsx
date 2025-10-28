@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useFirebaseAuth } from '@/firebase/provider';
 import {
   SidebarProvider,
@@ -32,30 +32,32 @@ import { auth } from '@/firebase/client';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, claims, initializing, loadingClaims } = useFirebaseAuth();
   const redirected = useRef(false);
 
-  // This boolean is the heart of the logic. It's only true when we have a definitive answer.
+  // If we are on the login page, don't apply any of the auth logic.
+  if (pathname === '/admin/login') {
+    return <>{children}</>;
+  }
+
   const ready = !initializing && (user ? !loadingClaims : true);
   const isAdmin = !!(claims && claims.role === 'admin');
 
   useEffect(() => {
-    // Wait until we are "ready" and haven't already redirected.
     if (!ready || redirected.current) {
         return;
     }
 
-    // Case 1: No user is logged in.
     if (!user) {
       redirected.current = true;
       router.replace('/admin/login');
       return;
     }
 
-    // Case 2: A user is logged in, but they are NOT an admin.
     if (user && !isAdmin) {
       redirected.current = true;
-      router.replace('/login'); // Redirect non-admins to the standard user login/dashboard
+      router.replace('/login');
       return;
     }
 
@@ -66,18 +68,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     router.push('/admin/login');
   };
 
-  // If we are not ready, show the main loading screen.
   if (!ready) {
     return <div className="flex h-screen w-full items-center justify-center">Loading Admin Portal…</div>;
   }
 
-  // If we are ready BUT the user is not an admin, we are about to redirect.
-  // Render nothing to prevent a flash of the wrong content.
   if (!isAdmin) {
       return null;
   }
   
-  // If we are ready and the user is an admin, show the dashboard.
   return (
     <SidebarProvider>
       <Sidebar>
