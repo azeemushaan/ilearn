@@ -1,7 +1,7 @@
 'use client';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useUser, useFirestore, useCollection, useMemoFirebase, useFirebaseAuth } from "@/firebase";
+import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth, useDoc } from "@/firebase";
 import { PlusCircle, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { collection, query, where, doc } from "firebase/firestore";
@@ -23,7 +23,7 @@ export default function DashboardPage() {
   const { data: subscriptions } = useCollection(userSubscriptionRef);
   const activeSubscription = subscriptions?.[0];
 
-  // Get the details of the plan from the /plans collection
+  // Get the details of the plan from the /subscription_plans collection
   const planDocRef = useMemoFirebase(() => {
     if(!firestore || !activeSubscription?.planId) return null;
     return doc(firestore, "subscription_plans", activeSubscription.planId);
