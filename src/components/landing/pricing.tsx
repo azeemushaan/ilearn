@@ -1,12 +1,12 @@
 'use client';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Check, X } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useFirestore, useCollection, useMemoFirebase, useUser } from "@/firebase";
-import { collection, addDoc, serverTimestamp, doc } from "firebase/firestore";
+import { useFirestore, useUser } from "@/firebase";
+import { collection, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
 import { toast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -18,14 +18,31 @@ const Pricing = () => {
   const router = useRouter();
   const [selectedPlan, setSelectedPlan] = useState<any>(null);
   const [transactionId, setTransactionId] = useState("");
+  const [plans, setPlans] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const plansCollectionRef = useMemoFirebase(() => {
-      if(!firestore) return null;
-      // The collection is named 'plans' as per the latest backend.json
-      return collection(firestore, 'plans');
+  useEffect(() => {
+    const fetchPlans = async () => {
+      if (!firestore) return;
+      try {
+        const plansCollectionRef = collection(firestore, 'plans');
+        const querySnapshot = await getDocs(plansCollectionRef);
+        const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setPlans(plansData);
+      } catch (error) {
+        console.error("Error fetching plans:", error);
+        toast({
+          variant: "destructive",
+          title: "Could not load pricing plans",
+          description: "Please try refreshing the page.",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchPlans();
   }, [firestore]);
-  
-  const { data: plans, isLoading } = useCollection(plansCollectionRef);
 
   const handleChoosePlan = (plan: any) => {
     if (!user) {
@@ -35,7 +52,6 @@ const Pricing = () => {
     if (plan.pricePKR > 0) {
       setSelectedPlan(plan);
     } else {
-      // This will now use the /payments collection as per the new schema
       subscribeToPlan(plan, "free", "");
     }
   };
@@ -178,3 +194,5 @@ const Pricing = () => {
 };
 
 export default Pricing;
+
+    
