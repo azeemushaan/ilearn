@@ -44,10 +44,10 @@ export default function AdminLayout({
   const [isLoadingClaims, setIsLoadingClaims] = useState(true);
 
   useEffect(() => {
-    console.log('[AdminLayout] useEffect triggered.', { isUserLoading });
+    console.log('[AdminLayout] useEffect triggered.', { isUserLoading, userExists: !!user });
 
     if (isUserLoading) {
-      console.log('[AdminLayout] User is loading. Waiting...');
+      console.log('[AdminLayout] User state is loading. Waiting...');
       return; // Wait until user object is resolved
     }
 
