@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth } from "@/firebase";
-import { collection, addDoc, serverTimestamp, query } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query, where } from "firebase/firestore";
 import { toast } from "@/hooks/use-toast";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const SubscriptionPage = () => {
-  const { claims } = useFirebaseAuth();
+  const { claims, initializing, loadingClaims } = useFirebaseAuth();
   const router = useRouter();
   const firestore = useFirestore();
 
@@ -156,7 +156,7 @@ const SubscriptionPage = () => {
   }
 
 
-  const isLoading = isLoadingPlans || isLoadingSubs;
+  const isLoading = isLoadingPlans || isLoadingSubs || initializing || loadingClaims;
 
   return (
     <div className="flex flex-1 flex-col">
@@ -177,7 +177,7 @@ const SubscriptionPage = () => {
                 <CardTitle className="text-2xl font-headline">{plan.name}</CardTitle>
                 <div className="flex items-baseline gap-2">
                     <span className="text-4xl font-bold">{getPriceDisplay(plan)}</span>
-                    {!(plan.priceUSD === 0 && plan.pricePKR === 0) && <span className="text-muted-foreground">/ month</span>}
+                    {!(plan.priceUSD === 0 && plan.pricePKR === 0) && !(plan.price === 0) && <span className="text-muted-foreground">/ month</span>}
                 </div>
                 <CardDescription>{plan.description}</CardDescription>
               </CardHeader>
@@ -240,4 +240,3 @@ const SubscriptionPage = () => {
 };
 
 export default SubscriptionPage;
-
