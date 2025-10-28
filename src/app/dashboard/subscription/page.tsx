@@ -5,16 +5,16 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth } from "@/firebase";
-import { collection, addDoc, serverTimestamp, getDocs, query, where } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp, query } from "firebase/firestore";
 import { toast } from "@/hooks/use-toast";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const SubscriptionPage = () => {
-  const { user, claims } = useFirebaseAuth();
+  const { claims } = useFirebaseAuth();
   const router = useRouter();
   const firestore = useFirestore();
 
@@ -240,3 +240,4 @@ const SubscriptionPage = () => {
 };
 
 export default SubscriptionPage;
+
