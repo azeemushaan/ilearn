@@ -9,7 +9,7 @@ import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { invoiceSchema } from '@/lib/schemas';
 import { z } from 'zod';
-import { createInvoiceAction } from '@/app/admin/(dashboard)/coaches/actions';
+import { createInvoiceAction } from '@/app/admin/dashboard/coaches/actions';
 import { useTransition } from 'react';
 import { toast } from '@/hooks/use-toast';
 

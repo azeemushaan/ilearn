@@ -28,18 +28,60 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  console.log('[LOGIN PAGE] Rendered, auth:', !!auth, 'isLoading:', isLoading);
+
   const handleLoginSuccess = async (user: User) => {
     if (!auth) return;
     
-    // Force a token refresh to get the latest custom claims
-    await user.getIdToken(true);
-    const tokenResult = await user.getIdTokenResult();
-    const claims = tokenResult.claims;
+    const startTime = Date.now();
+    try {
+      console.log('[LOGIN] Getting ID token...');
+      const tokenStart = Date.now();
+      const idToken = await user.getIdToken(true);
+      console.log(`[LOGIN] ID token obtained in ${Date.now() - tokenStart}ms`);
+      
+      console.log('[LOGIN] Creating session cookie...');
+      const sessionStart = Date.now();
+      const response: Response = await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      console.log(`[LOGIN] Session API response in ${Date.now() - sessionStart}ms`);
+      
+      if (!response.ok) {
+        const error = await response.json();
+        console.error('[LOGIN] Session creation failed:', error);
+        throw new Error('Session creation failed');
+      }
 
-    if (claims.role === 'admin') {
-        router.push("/admin/dashboard");
-    } else {
-        router.push("/dashboard");
+      const sessionData = await response.json();
+      console.log('[LOGIN] Session created:', sessionData);
+
+      console.log('[LOGIN] Getting token claims...');
+      const claimsStart = Date.now();
+      const tokenResult = await user.getIdTokenResult(true);
+      const claims = tokenResult.claims;
+      console.log(`[LOGIN] Claims obtained in ${Date.now() - claimsStart}ms:`, claims);
+
+      console.log(`[LOGIN] Total login time: ${Date.now() - startTime}ms`);
+
+      if (claims.role === 'admin') {
+        console.log('[LOGIN] Redirecting to /admin/dashboard');
+        window.location.href = "/admin/dashboard";
+      } else {
+        console.log('[LOGIN] Redirecting to /dashboard');
+        window.location.href = "/dashboard";
+      }
+    } catch (error) {
+      console.error('[LOGIN] Error:', error);
+      console.log(`[LOGIN] Failed after ${Date.now() - startTime}ms`);
+      toast({
+        variant: "destructive",
+        title: "Login failed",
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      setIsLoading(false);
     }
   };
 
@@ -64,12 +106,22 @@ export default function LoginPage() {
   
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth) return;
+    if (!auth) {
+      console.error('[LOGIN] Firebase auth not initialized');
+      return;
+    }
+    
+    console.log('[LOGIN] Form submitted');
     setIsLoading(true);
+    
     try {
+      console.log('[LOGIN] Signing in with email:', email);
+      const signInStart = Date.now();
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      console.log(`[LOGIN] Sign in successful in ${Date.now() - signInStart}ms, UID:`, userCredential.user.uid);
       await handleLoginSuccess(userCredential.user);
     } catch (error: any) {
+      console.error('[LOGIN] Email login error:', error);
       toast({
         variant: "destructive",
         title: "Login failed",
@@ -106,7 +158,13 @@ export default function LoginPage() {
               </div>
             </div>
           </div>
-          <form className="grid gap-4 mt-4" onSubmit={handleEmailLogin}>
+          <form 
+            className="grid gap-4 mt-4" 
+            onSubmit={(e) => {
+              console.log('[LOGIN] Form onSubmit triggered');
+              handleEmailLogin(e);
+            }}
+          >
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" type="email" placeholder="m@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} disabled={isLoading} />
@@ -120,7 +178,14 @@ export default function LoginPage() {
               </div>
               <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} disabled={isLoading} />
             </div>
-            <Button type="submit" className="w-full bg-primary text-primary-foreground hover:bg-primary/90" disabled={isLoading}>
+            <Button 
+              type="submit" 
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90" 
+              disabled={isLoading}
+              onClick={(e) => {
+                console.log('[LOGIN] Button clicked, isLoading:', isLoading, 'auth:', !!auth);
+              }}
+            >
               {isLoading ? "Logging in..." : "Login"}
             </Button>
           </form>

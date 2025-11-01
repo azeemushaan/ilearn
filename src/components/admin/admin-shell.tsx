@@ -25,15 +25,15 @@ import { cn } from '@/lib/utils';
 import { useImpersonation } from '@/hooks/use-impersonation';
 
 const NAVIGATION = [
-  { href: '/admin', label: 'Overview', icon: Home },
-  { href: '/admin/coaches', label: 'Coaches', icon: Building },
-  { href: '/admin/plans', label: 'Plans', icon: Package },
-  { href: '/admin/subscriptions', label: 'Subscriptions', icon: ShieldCheck },
-  { href: '/admin/payments', label: 'Payments', icon: CreditCard },
-  { href: '/admin/invoices', label: 'Invoices', icon: FileText },
-  { href: '/admin/users', label: 'Users', icon: Users },
-  { href: '/admin/audit', label: 'Audit', icon: ScrollText },
-  { href: '/admin/settings', label: 'Settings', icon: Settings },
+  { href: '/admin/dashboard', label: 'Overview', icon: Home },
+  { href: '/admin/dashboard/coaches', label: 'Coaches', icon: Building },
+  { href: '/admin/dashboard/plans', label: 'Plans', icon: Package },
+  { href: '/admin/dashboard/subscriptions', label: 'Subscriptions', icon: ShieldCheck },
+  { href: '/admin/dashboard/payments', label: 'Payments', icon: CreditCard },
+  { href: '/admin/dashboard/invoices', label: 'Invoices', icon: FileText },
+  { href: '/admin/dashboard/users', label: 'Students', icon: Users },
+  { href: '/admin/dashboard/audit', label: 'Audit', icon: ScrollText },
+  { href: '/admin/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 
 type AdminShellProps = {

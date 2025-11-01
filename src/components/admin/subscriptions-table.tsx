@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { updateSubscriptionAction } from '@/app/admin/(dashboard)/subscriptions/actions';
+import { updateSubscriptionAction } from '@/app/admin/dashboard/subscriptions/actions';
 import { useForm } from 'react-hook-form';
 import { toast } from '@/hooks/use-toast';
 
@@ -19,14 +19,12 @@ const TIERS = ['free', 'pro', 'enterprise'] as const;
 
 type FilterState = {
   status?: string;
-  tier?: string;
   coachId?: string;
 };
 
 type FormValues = {
   planId?: string;
-  tier?: string;
-  seatLimit?: number;
+  maxStudents?: number;
   status?: string;
   currentPeriodEnd?: string;
 };
@@ -39,8 +37,7 @@ export function SubscriptionsTable({ subscriptions, coaches, plans }: { subscrip
   const form = useForm<FormValues>({
     defaultValues: {
       planId: '',
-      tier: undefined,
-      seatLimit: undefined,
+      maxStudents: undefined,
       status: undefined,
       currentPeriodEnd: undefined,
     },
@@ -48,7 +45,6 @@ export function SubscriptionsTable({ subscriptions, coaches, plans }: { subscrip
 
   const filtered = useMemo(() => subscriptions.filter((subscription) => {
     if (filter.status && subscription.status !== filter.status) return false;
-    if (filter.tier && subscription.tier !== filter.tier) return false;
     if (filter.coachId && subscription.coachId !== filter.coachId) return false;
     return true;
   }), [subscriptions, filter]);
@@ -56,8 +52,7 @@ export function SubscriptionsTable({ subscriptions, coaches, plans }: { subscrip
   const columns: ColumnDef<Subscription>[] = [
     { accessorKey: 'coachId', header: 'Coach' },
     { accessorKey: 'planId', header: 'Plan' },
-    { accessorKey: 'tier', header: 'Tier' },
-    { accessorKey: 'seatLimit', header: 'Seats' },
+    { accessorKey: 'maxStudents', header: 'Max Students' },
     {
       accessorKey: 'status',
       header: 'Status',
@@ -74,8 +69,7 @@ export function SubscriptionsTable({ subscriptions, coaches, plans }: { subscrip
     setEditing(subscription);
     form.reset({
       planId: subscription.planId,
-      tier: subscription.tier,
-      seatLimit: subscription.seatLimit,
+      maxStudents: subscription.maxStudents,
       status: subscription.status,
       currentPeriodEnd: subscription.currentPeriodEnd ? subscription.currentPeriodEnd.toISOString().split('T')[0] : undefined,
     });
@@ -85,8 +79,7 @@ export function SubscriptionsTable({ subscriptions, coaches, plans }: { subscrip
     if (!editing) return;
     const payload = new FormData();
     if (values.planId) payload.set('planId', values.planId);
-    if (values.tier) payload.set('tier', values.tier);
-    if (values.seatLimit != null) payload.set('seatLimit', String(values.seatLimit));
+    if (values.maxStudents != null) payload.set('maxStudents', String(values.maxStudents));
     if (values.status) payload.set('status', values.status);
     if (values.currentPeriodEnd) payload.set('currentPeriodEnd', values.currentPeriodEnd);
 
@@ -112,14 +105,7 @@ export function SubscriptionsTable({ subscriptions, coaches, plans }: { subscrip
             </option>
           ))}
         </select>
-        <select className="h-9 rounded border px-2" value={filter.tier ?? ''} onChange={(event) => setFilter((prev) => ({ ...prev, tier: event.target.value || undefined }))}>
-          <option value="">All tiers</option>
-          {TIERS.map((tier) => (
-            <option key={tier} value={tier}>
-              {tier}
-            </option>
-          ))}
-        </select>
+
         <select className="h-9 rounded border px-2" value={filter.coachId ?? ''} onChange={(event) => setFilter((prev) => ({ ...prev, coachId: event.target.value || undefined }))}>
           <option value="">All coaches</option>
           {coaches.map((coach) => (
@@ -150,19 +136,8 @@ export function SubscriptionsTable({ subscriptions, coaches, plans }: { subscrip
               </select>
             </div>
             <div>
-              <Label htmlFor="tier">Tier</Label>
-              <select id="tier" className="w-full rounded border px-2 py-2" {...form.register('tier')}>
-                <option value="">Unchanged</option>
-                {TIERS.map((tier) => (
-                  <option key={tier} value={tier}>
-                    {tier}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label htmlFor="seatLimit">Seat limit</Label>
-              <Input id="seatLimit" type="number" {...form.register('seatLimit', { valueAsNumber: true })} />
+              <Label htmlFor="maxStudents">Max Students</Label>
+              <Input id="maxStudents" type="number" {...form.register('maxStudents', { valueAsNumber: true })} />
             </div>
             <div>
               <Label htmlFor="status">Status</Label>

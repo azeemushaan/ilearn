@@ -13,21 +13,22 @@ async function testSchemas() {
     createdAt: new Date(),
     updatedAt: new Date(),
   });
-  assert.equal(coach.plan.tier, 'pro');
+  assert.equal(coach.plan?.tier, 'pro');
 
   const plan = planSchema.parse({
+    name: 'pro',
     title: 'Pro',
-    tier: 'pro',
-    pricePKR: 1000,
-    priceUSD: null,
-    seatLimit: 10,
-    features: ['feature'],
+    priceUSD: 4,
+    maxStudents: 100,
+    maxPlaylists: 10,
+    enableQuizGeneration: true,
+    enableProgressTracking: true,
     isActive: true,
     sort: 0,
     createdAt: new Date(),
     updatedAt: new Date(),
   });
-  assert(plan.features.length === 1);
+  assert(plan.enableQuizGeneration === true);
 
   assert.throws(() => paymentSchema.parse({
     coachId: 'coach',
@@ -42,8 +43,7 @@ async function testSchemas() {
   const subscription = subscriptionSchema.parse({
     coachId: 'coach',
     planId: 'plan',
-    tier: 'pro',
-    seatLimit: 5,
+    maxStudents: 100,
     status: 'active',
     currentPeriodEnd: new Date(),
     createdAt: new Date(),

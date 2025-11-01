@@ -24,13 +24,13 @@ const Pricing = () => {
         const app = getApps().length > 0 ? getApps()[0] : initializeApp(firebaseConfig);
         const db = getFirestore(app);
         
-        const plansCollectionRef = collection(db, 'subscription_plans');
+        const plansCollectionRef = collection(db, 'plans');
         const q = query(plansCollectionRef);
         const querySnapshot = await getDocs(q);
         
-        const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const plansData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
         
-        setPlans(plansData.sort((a, b) => a.sort - b.sort));
+        setPlans(plansData.sort((a, b) => (a.sort || 0) - (b.sort || 0)));
       } catch (error) {
         console.error("Error fetching plans:", error);
         toast({
@@ -58,24 +58,8 @@ const Pricing = () => {
   );
 
   const getPriceDisplay = (plan: any) => {
-    if (!plan) return '';
-    
-    // Check for new schema with specific currency prices first
-    if (plan.currency === 'USD') {
-        if (plan.priceUSD === 0) return 'Free';
-        return `$${plan.priceUSD}`;
-    }
-    if (plan.currency === 'PKR') {
-        if (plan.pricePKR === 0) return 'Free';
-        return `Rs${plan.pricePKR}`;
-    }
-    
-    // Fallback for old schema or undefined currency
-    if (plan.price === 0) return 'Free';
-    if (plan.price) return `$${plan.price}`;
-
-    // Default case if no price is found
-    return 'Free';
+    if (!plan || plan.priceUSD === 0) return 'Free';
+    return `$${plan.priceUSD}`;
   }
 
   return (
@@ -93,15 +77,15 @@ const Pricing = () => {
           {isLoading && <div className="md:col-span-3 text-center"><p>Loading plans...</p></div>}
           {!isLoading && plans.length === 0 && <div className="md:col-span-3 text-center"><p>No plans found.</p></div>}
           {plans.map((plan: any) => (
-            <Card key={plan.id} className={cn("flex flex-col shadow-lg", plan.tier === "pro" && "border-accent ring-2 ring-accent")}>
+            <Card key={plan.id} className={cn("flex flex-col shadow-lg", plan.name === "professional" && "border-accent ring-2 ring-accent")}>
               <CardHeader className="pb-4">
-                {plan.tier === "pro" && (
+                {plan.name === "professional" && (
                     <div className="text-sm font-semibold text-accent -mt-2 mb-2">MOST POPULAR</div>
                 )}
-                <CardTitle className="text-2xl font-headline">{plan.name}</CardTitle>
+                <CardTitle className="text-2xl font-headline">{plan.title}</CardTitle>
                  <div className="flex items-baseline gap-2">
                     <span className="text-4xl font-bold">{getPriceDisplay(plan)}</span>
-                    {!(plan.priceUSD === 0 && plan.pricePKR === 0) && <span className="text-muted-foreground">/ month</span>}
+                    {plan.priceUSD !== 0 && <span className="text-muted-foreground">/ month</span>}
                 </div>
                 <CardDescription>{plan.description}</CardDescription>
               </CardHeader>
@@ -112,11 +96,14 @@ const Pricing = () => {
                     <Feature included={plan.enableQuizGeneration} text="AI Quiz Generation" />
                     <Feature included={plan.enableProgressTracking} text="Progress Tracking" />
                     <Feature included={plan.enableAntiSkip} text="Anti-Skip Controls" />
+                    <Feature included={plan.enableCustomBranding} text="Custom Branding" />
+                    <Feature included={plan.enableAPIAccess} text="API Access" />
+                    <Feature included={plan.enablePrioritySupport} text="Priority Support" />
                 </ul>
               </CardContent>
               <CardFooter>
                 <Button 
-                  className={cn("w-full", plan.tier === "pro" ? "bg-accent text-accent-foreground hover:bg-accent/90" : "bg-primary text-primary-foreground hover:bg-primary/90")}
+                  className={cn("w-full", plan.name === "professional" ? "bg-accent text-accent-foreground hover:bg-accent/90" : "bg-primary text-primary-foreground hover:bg-primary/90")}
                   onClick={() => handleChoosePlan(plan)}
                   disabled={isLoading}
                 >

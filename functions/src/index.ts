@@ -1,9 +1,10 @@
 import * as admin from 'firebase-admin';
-import { onDocumentUpdated, HttpsError } from 'firebase-functions/v2/firestore';
-import { onCall } from 'firebase-functions/v2/https';
+import { onDocumentUpdated, onDocumentCreated } from 'firebase-functions/v2/firestore';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import { Timestamp, DocumentData } from 'firebase-admin/firestore';
 import Handlebars from 'handlebars';
+import * as nodemailer from 'nodemailer';
 
 admin.initializeApp();
 
@@ -12,6 +13,8 @@ const auth = admin.auth();
 const storage = admin.storage();
 
 const SUPPORT_EMAIL = defineSecret('SUPPORT_EMAIL');
+const GMAIL_EMAIL = defineSecret('GMAIL_EMAIL');
+const GMAIL_PASSWORD = defineSecret('GMAIL_PASSWORD');
 
 function now() {
   return Timestamp.now();
@@ -179,3 +182,107 @@ export const sendInvoiceEmail = onCall({ region: 'asia-south1', secrets: [SUPPOR
 });
 
 export { generateReceiptPdf };
+
+// Send invitation email when a new invitation is created
+export const onInvitationCreated = onDocumentCreated(
+  { document: 'invitations/{invitationId}', secrets: [GMAIL_EMAIL, GMAIL_PASSWORD] },
+  async (event) => {
+    const invitation = event.data?.data();
+    if (!invitation) return;
+
+    try {
+      // Get coach details
+      const coachDoc = await firestore.collection('coaches').doc(invitation.coachId).get();
+      const coach = coachDoc.data();
+
+      // Configure email transporter
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: GMAIL_EMAIL.value(),
+          pass: GMAIL_PASSWORD.value(),
+        },
+      });
+
+      const signupUrl = `https://ilearn.er21.org/signup-student`;
+      
+      // Email HTML template
+      const emailHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }
+            .invite-code { background: white; border: 2px dashed #667eea; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px; }
+            .code { font-size: 32px; font-weight: bold; color: #667eea; letter-spacing: 4px; font-family: 'Courier New', monospace; }
+            .button { display: inline-block; background: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+            .footer { text-align: center; color: #6b7280; font-size: 14px; margin-top: 30px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1 style="margin: 0;">🎓 iLearn by ER21</h1>
+              <p style="margin: 10px 0 0 0;">You've been invited to join!</p>
+            </div>
+            <div class="content">
+              <h2>Hello!</h2>
+              <p>You've been invited by <strong>${coach?.displayName || 'your coach'}</strong> to join their class on iLearn.</p>
+              
+              <div class="invite-code">
+                <p style="margin: 0 0 10px 0; color: #6b7280;">Your Invite Code:</p>
+                <div class="code">${invitation.inviteCode}</div>
+              </div>
+
+              <p><strong>Next Steps:</strong></p>
+              <ol>
+                <li>Click the button below to sign up</li>
+                <li>Enter your details</li>
+                <li>Use the invite code above</li>
+                <li>Start learning!</li>
+              </ol>
+
+              <center>
+                <a href="${signupUrl}" class="button">Sign Up Now</a>
+              </center>
+
+              <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
+                This invitation will expire on ${new Date(invitation.expiresAt.toDate()).toLocaleDateString()}.
+              </p>
+            </div>
+            <div class="footer">
+              <p>iLearn by ER21 - Transform YouTube into Interactive Learning</p>
+              <p>If you didn't expect this invitation, you can safely ignore this email.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+
+      // Send email
+      await transporter.sendMail({
+        from: `"iLearn by ER21" <${GMAIL_EMAIL.value()}>`,
+        to: invitation.email,
+        subject: `You're invited to join ${coach?.displayName || 'iLearn'}!`,
+        html: emailHtml,
+      });
+
+      console.log(`Invitation email sent to ${invitation.email}`);
+      
+      // Log the email send
+      await writeAudit({
+        actorId: invitation.coachId,
+        action: 'invitation.email.sent',
+        target: { collection: 'invitations', id: event.params.invitationId },
+        coachId: invitation.coachId,
+        meta: { email: invitation.email, inviteCode: invitation.inviteCode },
+      });
+    } catch (error) {
+      console.error('Error sending invitation email:', error);
+      // Don't fail the function, just log the error
+    }
+  }
+);
