@@ -74,23 +74,45 @@ const GenerateMcqOutputSchema = z.object({
 });
 export type GenerateMcqOutput = z.infer<typeof GenerateMcqOutputSchema>;
 
+export class McqGenerationError extends Error {
+  public readonly metadata: Record<string, unknown>;
+
+  constructor(message: string, metadata: Record<string, unknown> = {}) {
+    super(message);
+    this.name = 'McqGenerationError';
+    this.metadata = metadata;
+  }
+}
+
 export async function generateMcq(input: GenerateMcqInput): Promise<GenerateMcqOutput> {
   try {
-    const {output} = await generateMcqFlow(input);
-
-    if (output?.questions?.length) {
-      return output;
-    }
+    return await generateMcqFlow(input);
   } catch (error) {
-    console.warn('Falling back to deterministic MCQ generator:', error);
+    if (error instanceof McqGenerationError) {
+      throw error;
+    }
+
+    const wrappedError = new McqGenerationError('MCQ generation flow failed', {
+      videoTitle: input.videoTitle,
+      chapterName: input.chapterName,
+      difficultyTarget: input.difficultyTarget,
+    });
+
+    if (typeof error === 'object' && error !== null) {
+      (wrappedError as Error & {cause?: unknown}).cause = error;
+    }
+
+    console.error('generateMcq.unexpectedFailure', {
+      message: wrappedError.message,
+      metadata: wrappedError.metadata,
+      cause:
+        error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack }
+          : { message: String(error) },
+    });
+
+    throw wrappedError;
   }
-
-  const fallbackQuestion = buildFallbackQuestion(input);
-
-  return {
-    questions: [fallbackQuestion],
-    progress: 'Generated fallback MCQ without LLM due to unavailable AI service.',
-  };
 }
 
 const generateMcqPrompt = ai.definePrompt({
@@ -161,7 +183,47 @@ const generateMcqFlow = ai.defineFlow(
     outputSchema: GenerateMcqOutputSchema,
   },
   async input => {
-    const {output} = await generateMcqPrompt(input);
-    return output!;
+    try {
+      const {output} = await generateMcqPrompt(input);
+
+      if (output && output.questions.length > 0) {
+        return output;
+      }
+
+      throw new McqGenerationError('MCQ generation returned no questions', {
+        videoTitle: input.videoTitle,
+        chapterName: input.chapterName,
+        difficultyTarget: input.difficultyTarget,
+      });
+    } catch (error) {
+      if (error instanceof McqGenerationError) {
+        console.error('generateMcqFlow.emptyResponse', {
+          message: error.message,
+          metadata: error.metadata,
+        });
+        throw error;
+      }
+
+      const wrappedError = new McqGenerationError('MCQ generation failed', {
+        videoTitle: input.videoTitle,
+        chapterName: input.chapterName,
+        difficultyTarget: input.difficultyTarget,
+      });
+
+      if (typeof error === 'object' && error !== null) {
+        (wrappedError as Error & {cause?: unknown}).cause = error;
+      }
+
+      console.error('generateMcqFlow.error', {
+        message: wrappedError.message,
+        metadata: wrappedError.metadata,
+        cause:
+          error instanceof Error
+            ? { name: error.name, message: error.message, stack: error.stack }
+            : { message: String(error) },
+      });
+
+      throw wrappedError;
+    }
   }
 );
