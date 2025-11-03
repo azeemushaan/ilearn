@@ -1,12 +1,16 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import { adminFirestore, adminStorage, adminAuth } from '@/lib/firebase/admin';
 import {
+  aiProviderSchema,
+  aiSettingsSchema,
   auditSchema,
   coachSchema,
   invoiceSchema,
   paymentSchema,
   planSchema,
+  promptTemplateSchema,
   subscriptionSchema,
+  type AiProvider,
   systemSettingsSchema,
   systemSettingsUpdateSchema,
   type AuditEvent,
@@ -14,6 +18,7 @@ import {
   type Invoice,
   type Payment,
   type Plan,
+  type PromptTemplate,
   type Subscription,
   type SystemSettings,
 } from '@/lib/schemas';
@@ -95,6 +100,354 @@ export async function updateSystemSettings(settings: Partial<SystemSettings>, ac
     action: 'settings.update',
     target: { collection: 'settings', id: 'system' },
     meta: settings,
+  });
+}
+
+const aiProviderValues = aiProviderSchema.options as readonly AiProvider[];
+
+const defaultAiSettings: { provider: AiProvider; model: string; activePromptId: string | null } = {
+  provider: 'google',
+  model: 'googleai/gemini-2.5-flash',
+  activePromptId: null,
+};
+
+export type SystemAiSettings = {
+  provider: AiProvider;
+  model: string;
+  activePromptId: string | null;
+  apiKeyMask: string | null;
+  hasApiKey: boolean;
+};
+
+function maskApiKey(apiKey: string) {
+  if (!apiKey) return null;
+  const trimmed = apiKey.trim();
+  if (trimmed.length <= 8) return '••••';
+  const start = trimmed.slice(0, 4);
+  const end = trimmed.slice(-4);
+  return `${start}••••${end}`;
+}
+
+export async function getSystemAiSettings(): Promise<SystemAiSettings> {
+  const doc = await adminFirestore().collection('settings').doc('system.ai').get();
+  if (!doc.exists) {
+    return {
+      provider: defaultAiSettings.provider,
+      model: defaultAiSettings.model,
+      activePromptId: defaultAiSettings.activePromptId,
+      apiKeyMask: null,
+      hasApiKey: false,
+    } satisfies SystemAiSettings;
+  }
+
+  const data = aiSettingsSchema.partial().parse(doc.data() ?? {});
+  const provider = aiProviderValues.includes(data.provider as AiProvider)
+    ? (data.provider as AiProvider)
+    : defaultAiSettings.provider;
+  const model = typeof data.model === 'string' && data.model.length > 0
+    ? data.model
+    : defaultAiSettings.model;
+  const activePromptId = typeof data.activePromptId === 'string' && data.activePromptId.length > 0
+    ? data.activePromptId
+    : null;
+  const apiKey = typeof data.apiKey === 'string' ? data.apiKey : null;
+
+  return {
+    provider,
+    model,
+    activePromptId,
+    apiKeyMask: maskApiKey(apiKey ?? ''),
+    hasApiKey: Boolean(apiKey),
+  } satisfies SystemAiSettings;
+}
+
+type UpdateAiSettingsInput = Partial<{
+  provider: AiProvider;
+  model: string;
+  apiKey: string | null;
+  activePromptId: string | null;
+}>;
+
+export async function updateSystemAiSettings(settings: UpdateAiSettingsInput, actorId: string) {
+  const firestore = adminFirestore();
+  const payload: Record<string, unknown> = {
+    updatedAt: nowTimestamp(),
+  };
+
+  if (settings.provider && aiProviderValues.includes(settings.provider)) {
+    payload.provider = settings.provider;
+  }
+
+  if (typeof settings.model === 'string' && settings.model.trim()) {
+    payload.model = settings.model.trim();
+  }
+
+  if (settings.apiKey !== undefined) {
+    const sanitized = settings.apiKey && settings.apiKey.trim().length > 0 ? settings.apiKey.trim() : null;
+    payload.apiKey = sanitized;
+  }
+
+  if ('activePromptId' in settings) {
+    payload.activePromptId = settings.activePromptId ?? null;
+    await setActivePromptTemplate(settings.activePromptId ?? null, actorId, { updateSettingsDocument: false });
+  }
+
+  await firestore.collection('settings').doc('system.ai').set(payload, { merge: true });
+
+  const meta: Record<string, unknown> = {};
+  if (payload.provider) meta.provider = payload.provider;
+  if (payload.model) meta.model = payload.model;
+  if ('apiKey' in payload) meta.apiKeyUpdated = Boolean(payload.apiKey);
+  if ('activePromptId' in payload) meta.activePromptId = payload.activePromptId;
+
+  await writeAudit({
+    actorId,
+    action: 'settings.ai.update',
+    target: { collection: 'settings', id: 'system.ai' },
+    meta,
+  });
+}
+
+export async function listPromptTemplates(): Promise<PromptTemplate[]> {
+  const snapshot = await adminFirestore().collection('prompts').orderBy('updatedAt', 'desc').get();
+  return snapshot.docs.map((doc) => ({
+    ...promptTemplateSchema.parse(doc.data()),
+    id: doc.id,
+  }));
+}
+
+export async function getPromptTemplate(id: string): Promise<PromptTemplate | null> {
+  const doc = await adminFirestore().collection('prompts').doc(id).get();
+  if (!doc.exists) return null;
+  return { ...promptTemplateSchema.parse(doc.data()), id: doc.id };
+}
+
+export async function getActivePromptTemplate(
+  aiSettings?: SystemAiSettings,
+): Promise<PromptTemplate | null> {
+  const settings = aiSettings ?? (await getSystemAiSettings());
+  if (settings.activePromptId) {
+    const fromSettings = await getPromptTemplate(settings.activePromptId);
+    if (fromSettings) return fromSettings;
+  }
+
+  const snapshot = await adminFirestore().collection('prompts').where('active', '==', true).limit(1).get();
+  if (!snapshot.empty) {
+    const doc = snapshot.docs[0];
+    return { ...promptTemplateSchema.parse(doc.data()), id: doc.id };
+  }
+
+  return null;
+}
+
+type PromptTemplatePayload = {
+  name: string;
+  description?: string | null;
+  content: string;
+  active?: boolean;
+};
+
+export async function createPromptTemplate(data: PromptTemplatePayload, actorId: string) {
+  const firestore = adminFirestore();
+  const name = data.name.trim();
+  const content = data.content.trim();
+
+  if (!name) {
+    throw new Error('Prompt name is required');
+  }
+
+  if (!content) {
+    throw new Error('Prompt content is required');
+  }
+
+  const now = nowTimestamp();
+  const payload = {
+    name,
+    description: data.description?.trim() || null,
+    content,
+    active: Boolean(data.active),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const ref = await firestore.collection('prompts').add(payload);
+
+  await writeAudit({
+    actorId,
+    action: 'prompt.create',
+    target: { collection: 'prompts', id: ref.id },
+    meta: { name: payload.name, active: payload.active },
+  });
+
+  if (payload.active) {
+    await setActivePromptTemplate(ref.id, actorId);
+  }
+
+  return ref.id;
+}
+
+export async function updatePromptTemplate(
+  id: string,
+  data: Partial<PromptTemplatePayload>,
+  actorId: string,
+) {
+  const firestore = adminFirestore();
+  const docRef = firestore.collection('prompts').doc(id);
+  const snapshot = await docRef.get();
+  if (!snapshot.exists) throw new Error('Prompt template not found');
+
+  const current = promptTemplateSchema.parse({ ...snapshot.data(), id });
+  const updates: Record<string, unknown> = { updatedAt: nowTimestamp() };
+
+  if (typeof data.name === 'string') {
+    const trimmed = data.name.trim();
+    if (!trimmed) throw new Error('Prompt name cannot be empty');
+    updates.name = trimmed;
+  }
+
+  if (data.description !== undefined) {
+    const trimmed = data.description ? data.description.trim() : null;
+    updates.description = trimmed;
+  }
+
+  if (typeof data.content === 'string') {
+    const trimmed = data.content.trim();
+    if (!trimmed) throw new Error('Prompt content cannot be empty');
+    updates.content = trimmed;
+  }
+
+  if (typeof data.active === 'boolean') {
+    updates.active = data.active;
+  }
+
+  await docRef.update(updates);
+
+  await writeAudit({
+    actorId,
+    action: 'prompt.update',
+    target: { collection: 'prompts', id },
+    meta: updates,
+  });
+
+  if (data.active === true) {
+    await setActivePromptTemplate(id, actorId);
+  } else if (data.active === false && current.active) {
+    await setActivePromptTemplate(null, actorId);
+  }
+}
+
+export async function deletePromptTemplate(id: string, actorId: string) {
+  const firestore = adminFirestore();
+  const docRef = firestore.collection('prompts').doc(id);
+  const snapshot = await docRef.get();
+  if (!snapshot.exists) return;
+
+  const current = promptTemplateSchema.parse({ ...snapshot.data(), id });
+  await docRef.delete();
+
+  await writeAudit({
+    actorId,
+    action: 'prompt.delete',
+    target: { collection: 'prompts', id },
+    meta: { name: current.name },
+  });
+
+  if (current.active) {
+    await setActivePromptTemplate(null, actorId);
+  }
+}
+
+type SetActivePromptTemplateOptions = {
+  updateSettingsDocument?: boolean;
+};
+
+export async function setActivePromptTemplate(
+  id: string | null,
+  actorId: string,
+  options: SetActivePromptTemplateOptions = {},
+) {
+  const firestore = adminFirestore();
+  const prompts = firestore.collection('prompts');
+  const now = nowTimestamp();
+  const batch = firestore.batch();
+  let hasUpdates = false;
+
+  const activeSnap = await prompts.where('active', '==', true).get();
+  activeSnap.docs.forEach((doc) => {
+    if (!id || doc.id !== id) {
+      batch.update(doc.ref, { active: false, updatedAt: now });
+      hasUpdates = true;
+    }
+  });
+
+  if (id) {
+    const targetRef = prompts.doc(id);
+    const targetDoc = await targetRef.get();
+    if (!targetDoc.exists) {
+      throw new Error('Prompt template not found');
+    }
+    const targetData = promptTemplateSchema.parse({ ...targetDoc.data(), id });
+    if (!targetData.active) {
+      batch.update(targetRef, { active: true, updatedAt: now });
+      hasUpdates = true;
+    } else {
+      batch.update(targetRef, { updatedAt: now });
+      hasUpdates = true;
+    }
+  }
+
+  if (hasUpdates) {
+    await batch.commit();
+  }
+
+  if (options.updateSettingsDocument !== false) {
+    await firestore
+      .collection('settings')
+      .doc('system.ai')
+      .set({ activePromptId: id ?? null, updatedAt: nowTimestamp() }, { merge: true });
+  }
+
+  await writeAudit({
+    actorId,
+    action: 'prompt.setActive',
+    target: { collection: 'prompts', id: id ?? 'default-template' },
+    meta: { activePromptId: id },
+  });
+}
+
+type PromptUsageLog = {
+  promptId: string | null;
+  status: 'success' | 'error';
+  videoTitle: string;
+  chapterName: string;
+  difficulty: string;
+  locale?: string;
+  coachId?: string | null;
+  videoId?: string | null;
+  usedFallback: boolean;
+  provider?: string;
+  model?: string;
+  errorMessage?: string;
+};
+
+export async function recordPromptUsage(event: PromptUsageLog) {
+  await writeAudit({
+    actorId: 'system',
+    coachId: event.coachId ?? undefined,
+    action: 'prompt.usage',
+    target: { collection: 'prompts', id: event.promptId ?? 'default-template' },
+    meta: {
+      status: event.status,
+      videoTitle: event.videoTitle,
+      chapterName: event.chapterName,
+      difficulty: event.difficulty,
+      locale: event.locale,
+      videoId: event.videoId,
+      usedFallback: event.usedFallback,
+      provider: event.provider,
+      model: event.model,
+      errorMessage: event.errorMessage,
+    },
   });
 }
 

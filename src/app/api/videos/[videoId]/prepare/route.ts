@@ -153,6 +153,8 @@ export async function POST(
             gradeBand: '1-8', // Default for now
             locale: 'en',
             difficultyTarget: difficulty,
+            coachId,
+            videoId,
           });
         } catch (mcqError) {
           logSegmentError(i, difficulty, mcqError);
