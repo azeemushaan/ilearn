@@ -121,6 +121,7 @@ async function seedDemoVideos() {
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
         const segmentRef = await db.collection(`videos/${videoRef.id}/segments`).add({
+          coachId,
           ...segment,
           textChunkHash: `hash-${i}`,
           questionCount: 2,
@@ -161,6 +162,9 @@ async function seedDemoVideos() {
 
         for (const question of questions) {
           await db.collection(`videos/${videoRef.id}/segments/${segmentRef.id}/questions`).add({
+            coachId,
+            segmentId: segmentRef.id,
+            videoId: videoRef.id,
             ...question,
             createdAt: Timestamp.now(),
           });
