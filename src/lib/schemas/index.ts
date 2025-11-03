@@ -177,6 +177,63 @@ export type EntityWithTimestamps<T> = T & {
   updatedAt: Date | null;
 };
 
+const aiRuntimeSchema = z
+  .object({
+    temperature: z.number().min(0).max(2).optional(),
+    maxOutputTokens: z.number().int().positive().optional(),
+    topP: z.number().min(0).max(1).optional(),
+    topK: z.number().int().min(0).optional(),
+    stopSequences: z.array(z.string()).optional(),
+    presencePenalty: z.number().optional(),
+    frequencyPenalty: z.number().optional(),
+  })
+  .passthrough();
+
+export const defaultAiSettings = {
+  provider: 'googleai',
+  model: 'googleai/gemini-2.5-flash',
+  runtime: {},
+  requestHeaders: {},
+} as const;
+
+export const aiSettingsSchema = z
+  .object({
+    provider: z.string().min(1).default(defaultAiSettings.provider),
+    model: z.string().min(1).default(defaultAiSettings.model),
+    baseUrl: z.string().url().optional(),
+    apiKeySecret: z.string().min(1).optional(),
+    runtime: aiRuntimeSchema.default({}),
+    requestHeaders: z.record(z.string()).default({}),
+  })
+  .default(defaultAiSettings);
+
+export type AiRuntimeOptions = z.infer<typeof aiRuntimeSchema>;
+export type AiSettings = z.infer<typeof aiSettingsSchema>;
+
+export const systemBrandingSchema = z
+  .object({
+    logoUrl: z.string().url().nullish(),
+  })
+  .default({});
+
+const systemSettingsBaseSchema = z.object({
+  manualPaymentsEnabled: z.boolean().default(true),
+  supportEmail: z.string().email().default('support@example.com'),
+  branding: systemBrandingSchema,
+  ai: aiSettingsSchema,
+});
+
+export const systemSettingsSchema = systemSettingsBaseSchema.default({
+  manualPaymentsEnabled: true,
+  supportEmail: 'support@example.com',
+  branding: {},
+  ai: defaultAiSettings,
+});
+
+export const systemSettingsUpdateSchema = systemSettingsBaseSchema.partial();
+
+export type SystemSettings = z.infer<typeof systemSettingsSchema>;
+
 // Core LMS schemas for YouTube playlist assignments
 
 export const playlistSchema = z.object({

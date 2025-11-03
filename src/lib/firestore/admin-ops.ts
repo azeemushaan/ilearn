@@ -11,6 +11,8 @@ import {
   promptTemplateSchema,
   subscriptionSchema,
   type AiProvider,
+  systemSettingsSchema,
+  systemSettingsUpdateSchema,
   type AuditEvent,
   type Coach,
   type Invoice,
@@ -18,6 +20,7 @@ import {
   type Plan,
   type PromptTemplate,
   type Subscription,
+  type SystemSettings,
 } from '@/lib/schemas';
 
 function nowTimestamp(date?: Date) {
@@ -80,28 +83,17 @@ export async function listPlans(): Promise<Plan[]> {
   }));
 }
 
-export type SystemSettings = {
-  manualPaymentsEnabled: boolean;
-  supportEmail: string;
-  branding: {
-    logoUrl?: string | null;
-  };
-};
-
-const defaultSettings: SystemSettings = {
-  manualPaymentsEnabled: true,
-  supportEmail: 'support@example.com',
-  branding: {},
-};
-
 export async function getSystemSettings(): Promise<SystemSettings> {
   const doc = await adminFirestore().collection('settings').doc('system').get();
-  if (!doc.exists) return defaultSettings;
-  return { ...defaultSettings, ...doc.data() } as SystemSettings;
+  if (!doc.exists) {
+    return systemSettingsSchema.parse({});
+  }
+  return systemSettingsSchema.parse(doc.data() ?? {});
 }
 
 export async function updateSystemSettings(settings: Partial<SystemSettings>, actorId: string) {
-  const payload = { ...settings, updatedAt: nowTimestamp() };
+  const parsed = systemSettingsUpdateSchema.parse(settings);
+  const payload = { ...parsed, updatedAt: nowTimestamp() };
   await adminFirestore().collection('settings').doc('system').set(payload, { merge: true });
   await writeAudit({
     actorId,

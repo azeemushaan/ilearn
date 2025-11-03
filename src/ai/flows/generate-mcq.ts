@@ -8,7 +8,7 @@
  * - GenerateMcqOutput - The return type for the generateMcq function.
  */
 
-import {ai} from '@/ai/genkit';
+import {ai, aiModelName, aiRuntimeConfig} from '@/ai/genkit';
 import {z} from 'genkit';
 import {
   getActivePromptTemplate,
@@ -205,6 +205,8 @@ const generateMcqPrompt = ai.definePrompt({
     return [{ text: DEFAULT_MCQ_PROMPT_TEMPLATE }];
   },
   config: {
+    model: aiModelName,
+    ...aiRuntimeConfig,
     safetySettings: [
       {
         category: 'HARM_CATEGORY_HATE_SPEECH',
