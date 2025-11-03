@@ -8,7 +8,7 @@
  * - GenerateMcqOutput - The return type for the generateMcq function.
  */
 
-import {ai} from '@/ai/genkit';
+import {ai, aiModelName, aiRuntimeConfig} from '@/ai/genkit';
 import {z} from 'genkit';
 
 const GenerateMcqInputSchema = z.object({
@@ -78,6 +78,8 @@ const generateMcqPrompt = ai.definePrompt({
   Disallow personal data; maintain a neutral tone; ensure child-safety; ban controversial topics unless educational & teacher-approved.
 `,
   config: {
+    model: aiModelName,
+    ...aiRuntimeConfig,
     safetySettings: [
       {
         category: 'HARM_CATEGORY_HATE_SPEECH',
