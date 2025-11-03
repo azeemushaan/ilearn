@@ -1,7 +1,9 @@
 'use client';
 
+import React from 'react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useFirestore, useDoc, useCollection, useMemoFirebase, useFirebaseAuth } from '@/firebase';
 import { doc, collection, query, where, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,16 +20,21 @@ declare global {
   }
 }
 
-export default function WatchVideoPage({ params }: { params: { videoId: string } }) {
-  const searchParams = useSearchParams();
-  const assignmentId = searchParams.get('assignmentId');
+export default function WatchPage({ params }: { params: Promise<{ videoId: string }> }) {
+  const { user, claims } = useFirebaseAuth();
   const firestore = useFirestore();
-  const { user } = useFirebaseAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const assignmentId = searchParams?.get('assignmentId') || null;
+  
+  // Unwrap the params Promise
+  const unwrappedParams = React.use(params);
+  const videoId = unwrappedParams.videoId;
 
   const [player, setPlayer] = useState<any>(null);
-  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
   const [showQuiz, setShowQuiz] = useState(false);
   const [currentQuestion, setCurrentQuestion] = useState<any>(null);
+  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [answered, setAnswered] = useState(false);
   const playerRef = useRef<HTMLDivElement>(null);
@@ -35,17 +42,17 @@ export default function WatchVideoPage({ params }: { params: { videoId: string }
 
   const videoRef = useMemoFirebase(() => {
     if (!firestore) return null;
-    return doc(firestore, 'videos', params.videoId);
-  }, [firestore, params.videoId]);
+    return doc(firestore, 'videos', videoId);
+  }, [firestore, videoId]);
 
   const { data: video, isLoading: loadingVideo } = useDoc(videoRef);
 
   const segmentsRef = useMemoFirebase(() => {
     if (!firestore) return null;
     return query(
-      collection(firestore, `videos/${params.videoId}/segments`)
+      collection(firestore, `videos/${videoId}/segments`)
     );
-  }, [firestore, params.videoId]);
+  }, [firestore, videoId]);
 
   const { data: segments, isLoading: loadingSegments } = useCollection(segmentsRef);
 
@@ -131,7 +138,7 @@ export default function WatchVideoPage({ params }: { params: { videoId: string }
   };
 
   const loadQuestionForSegment = async (segmentId: string) => {
-    const questionsRef = collection(firestore!, `videos/${params.videoId}/segments/${segmentId}/questions`);
+    const questionsRef = collection(firestore!, `videos/${videoId}/segments/${segmentId}/questions`);
     const { getDocs } = await import('firebase/firestore');
     const questionsSnap = await getDocs(questionsRef);
     
@@ -161,7 +168,7 @@ export default function WatchVideoPage({ params }: { params: { videoId: string }
         assignmentId,
         questionId: currentQuestion.id,
         segmentId: currentQuestion.segmentId,
-        videoId: params.videoId,
+        videoId: videoId,
         chosenIndex: selectedOption,
         isCorrect,
         ts: serverTimestamp(),
@@ -173,7 +180,7 @@ export default function WatchVideoPage({ params }: { params: { videoId: string }
           collection(firestore!, 'progress'),
           where('studentId', '==', user.uid),
           where('assignmentId', '==', assignmentId),
-          where('videoId', '==', params.videoId)
+          where('videoId', '==', videoId)
         );
         const { getDocs } = await import('firebase/firestore');
         const progressSnap = await getDocs(progressQuery);
@@ -187,7 +194,7 @@ export default function WatchVideoPage({ params }: { params: { videoId: string }
         const attemptsQuery = fbQuery(
           fbCollection(firestore!, 'attempts'),
           fbWhere('studentId', '==', user.uid),
-          fbWhere('videoId', '==', params.videoId)
+          fbWhere('videoId', '==', videoId)
         );
         const attemptsSnap = await fbGetDocs(attemptsQuery);
         const totalAttempts = attemptsSnap.size;
@@ -199,7 +206,7 @@ export default function WatchVideoPage({ params }: { params: { videoId: string }
           await addDoc(collection(firestore!, 'progress'), {
             studentId: user.uid,
             assignmentId,
-            videoId: params.videoId,
+            videoId: videoId,
             watchPct,
             score,
             attempts: 1,

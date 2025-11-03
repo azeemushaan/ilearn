@@ -2,6 +2,8 @@ import { getApps, initializeApp, cert, App } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 type FirebaseAdminConfig = {
   projectId: string;
@@ -22,26 +24,28 @@ export function getAdminApp() {
     return app;
   }
 
-  const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+  // Load from service account key file
+  try {
+    const serviceAccountPath = resolve(process.cwd(), 'sa-key.json');
+    const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, 'utf8'));
+    
+    const config: FirebaseAdminConfig = {
+      projectId: serviceAccount.project_id,
+      clientEmail: serviceAccount.client_email,
+      privateKey: serviceAccount.private_key,
+    };
 
-  if (!projectId || !clientEmail || !privateKey) {
-    throw new Error('Missing Firebase admin credentials. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY.');
+    app = initializeApp({
+      credential: cert(config),
+      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    });
+
+    console.log('[FIREBASE] Initialized with service account key file');
+    return app;
+  } catch (error) {
+    console.error('[FIREBASE] Failed to load service account key file:', error);
+    throw new Error('Failed to initialize Firebase Admin SDK. Please check your service account key file.');
   }
-
-  const config: FirebaseAdminConfig = {
-    projectId,
-    clientEmail,
-    privateKey,
-  };
-
-  app = initializeApp({
-    credential: cert(config),
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  });
-
-  return app;
 }
 
 export const adminFirestore = () => getFirestore(getAdminApp());

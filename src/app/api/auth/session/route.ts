@@ -18,29 +18,48 @@ export async function POST(request: NextRequest) {
 
     const expiresIn = 60 * 60 * 24 * 5 * 1000;
     console.log('[SESSION] Creating session cookie...');
-    const sessionCookie = await adminAuth().createSessionCookie(idToken, { expiresIn });
-    console.log('[SESSION] Session cookie created, length:', sessionCookie.length);
+    
+    // Add better error handling for session cookie creation
+    try {
+      const sessionCookie = await adminAuth().createSessionCookie(idToken, { expiresIn });
+      console.log('[SESSION] Session cookie created, length:', sessionCookie.length);
 
-    const response = NextResponse.json({
-      success: true,
-      uid: decodedToken.uid,
-      role: decodedToken.role,
-    });
+      const response = NextResponse.json({
+        success: true,
+        uid: decodedToken.uid,
+        role: decodedToken.role,
+      });
 
-    response.cookies.set({
-      name: '__session',
-      value: sessionCookie,
-      maxAge: expiresIn / 1000,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-    });
-    console.log('[SESSION] Cookie set in response');
+      response.cookies.set({
+        name: '__session',
+        value: sessionCookie,
+        maxAge: expiresIn / 1000,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+      });
+      console.log('[SESSION] Cookie set in response');
 
-    return response;
-  } catch (error) {
+      return response;
+    } catch (cookieError: any) {
+      console.error('[SESSION] Failed to create session cookie:', cookieError);
+      // Check if it's a credential error
+      if (cookieError?.code === 'auth/invalid-credential' || 
+          cookieError?.message?.includes('Credential implementation') ||
+          cookieError?.message?.includes('invalid_grant')) {
+        return NextResponse.json({ 
+          error: 'Authentication service unavailable. Please check server configuration.' 
+        }, { status: 500 });
+      }
+      throw cookieError;
+    }
+  } catch (error: any) {
     console.error('[SESSION] Error:', error);
+    // Return more specific error messages
+    if (error?.code === 'auth/argument-error') {
+      return NextResponse.json({ error: 'Invalid authentication token' }, { status: 400 });
+    }
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 }

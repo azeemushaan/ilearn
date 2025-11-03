@@ -11,6 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { PlayCircle, CheckCircle, Clock, Video as VideoIcon, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import React from 'react';
 
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -23,14 +24,18 @@ function formatDuration(seconds: number): string {
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
-export default function AssignmentPage({ params }: { params: { assignmentId: string } }) {
+export default function AssignmentPage({ params }: { params: Promise<{ assignmentId: string }> }) {
   const firestore = useFirestore();
   const { user } = useFirebaseAuth();
+  
+  // Unwrap the params Promise
+  const unwrappedParams = React.use(params);
+  const assignmentId = unwrappedParams.assignmentId;
 
   const assignmentRef = useMemoFirebase(() => {
     if (!firestore) return null;
-    return doc(firestore, 'assignments', params.assignmentId);
-  }, [firestore, params.assignmentId]);
+    return doc(firestore, 'assignments', assignmentId);
+  }, [firestore, assignmentId]);
 
   const { data: assignment, isLoading: loadingAssignment } = useDoc(assignmentRef);
 
@@ -52,13 +57,13 @@ export default function AssignmentPage({ params }: { params: { assignmentId: str
   const { data: videos, isLoading: loadingVideos } = useCollection(videosRef);
 
   const progressRef = useMemoFirebase(() => {
-    if (!firestore || !user?.uid || !params.assignmentId) return null;
+    if (!firestore || !user?.uid || !assignmentId) return null;
     return query(
       collection(firestore, 'progress'),
       where('studentId', '==', user.uid),
-      where('assignmentId', '==', params.assignmentId)
+      where('assignmentId', '==', assignmentId)
     );
-  }, [firestore, user, params.assignmentId]);
+  }, [firestore, user, assignmentId]);
 
   const { data: progressDocs } = useCollection(progressRef);
 
@@ -257,7 +262,7 @@ export default function AssignmentPage({ params }: { params: { assignmentId: str
                           {/* Action Button */}
                           <div className="flex items-center gap-2 pt-2">
                             <Button asChild size="sm" className="min-w-[120px]">
-                              <Link href={`/dashboard/watch/${video.id}?assignmentId=${params.assignmentId}`}>
+                              <Link href={`/dashboard/watch/${video.id}?assignmentId=${assignmentId}`}>
                                 {watchPct > 0 ? (
                                   <>
                                     <PlayCircle className="h-4 w-4 mr-1" />

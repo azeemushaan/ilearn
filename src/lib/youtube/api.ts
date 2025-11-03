@@ -58,7 +58,11 @@ export async function fetchPlaylistMetadata(playlistId: string): Promise<YouTube
   
   const response: Response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`YouTube API error: ${response.statusText}`);
+    const errorText = await response.text();
+    console.error(`YouTube API error for URL: ${url}`);
+    console.error(`Status: ${response.status} ${response.statusText}`);
+    console.error(`Response: ${errorText}`);
+    throw new Error(`YouTube API error: ${response.status} ${response.statusText} - ${errorText}`);
   }
 
   const data = await response.json();
@@ -96,7 +100,11 @@ export async function fetchPlaylistVideos(playlistId: string): Promise<string[]>
     
     const response: Response = await fetch(url);
     if (!response.ok) {
-      throw new Error(`YouTube API error: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error(`YouTube API error for URL: ${url}`);
+      console.error(`Status: ${response.status} ${response.statusText}`);
+      console.error(`Response: ${errorText}`);
+      throw new Error(`YouTube API error: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const data = await response.json();
@@ -132,7 +140,11 @@ export async function fetchVideosMetadata(videoIds: string[]): Promise<YouTubeVi
     
     const response: Response = await fetch(url);
     if (!response.ok) {
-      throw new Error(`YouTube API error: ${response.statusText}`);
+      const errorText = await response.text();
+      console.error(`YouTube API error for URL: ${url}`);
+      console.error(`Status: ${response.status} ${response.statusText}`);
+      console.error(`Response: ${errorText}`);
+      throw new Error(`YouTube API error: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const data = await response.json();

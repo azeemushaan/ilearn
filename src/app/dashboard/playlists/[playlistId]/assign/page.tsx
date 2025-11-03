@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { useState, useTransition } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,19 +13,23 @@ import { toast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { Loader2, UserPlus } from 'lucide-react';
 
-export default function AssignPlaylistPage({ params }: { params: { playlistId: string } }) {
-  const router = useRouter();
+export default function AssignPlaylistPage({ params }: { params: Promise<{ playlistId: string }> }) {
   const firestore = useFirestore();
+  const router = useRouter();
   const { claims } = useFirebaseAuth();
-  const [pending, startTransition] = useTransition();
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
+  const [pending, startTransition] = useTransition();
   const [assignmentTitle, setAssignmentTitle] = useState('');
   const [daysUntilDue, setDaysUntilDue] = useState('30');
 
+  // Unwrap the params Promise
+  const unwrappedParams = React.use(params);
+  const playlistId = unwrappedParams.playlistId;
+
   const playlistRef = useMemoFirebase(() => {
     if (!firestore) return null;
-    return doc(firestore, 'playlists', params.playlistId);
-  }, [firestore, params.playlistId]);
+    return doc(firestore, 'playlists', playlistId);
+  }, [firestore, playlistId]);
 
   const { data: playlist } = useDoc(playlistRef);
 
@@ -67,7 +72,7 @@ export default function AssignPlaylistPage({ params }: { params: { playlistId: s
         const assignmentsCollection = collection(firestore!, 'assignments');
         await addDoc(assignmentsCollection, {
           coachId: claims?.coachId,
-          playlistId: params.playlistId,
+          playlistId: playlistId,
           studentIds: selectedStudents,
           title: assignmentTitle,
           startAt: startDate,
