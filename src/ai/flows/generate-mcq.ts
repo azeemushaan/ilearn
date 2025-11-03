@@ -23,6 +23,42 @@ const GenerateMcqInputSchema = z.object({
 });
 export type GenerateMcqInput = z.infer<typeof GenerateMcqInputSchema>;
 
+function buildFallbackQuestion(input: GenerateMcqInput) {
+  const cleanedTranscript = input.transcriptChunk.replace(/\s+/g, ' ').trim();
+  const sentenceMatches = cleanedTranscript.match(/[^.!?]+[.!?]?/g) || [];
+  const candidateSentence =
+    sentenceMatches.sort((a, b) => b.length - a.length)[0]?.trim() ||
+    cleanedTranscript.slice(0, 140).trim();
+
+  const mainIdea =
+    candidateSentence || `This segment focuses on the topic "${input.chapterName}".`;
+
+  const clamp = (text: string) =>
+    text.length > 140 ? `${text.slice(0, 137)}...` : text;
+
+  const distractors = [
+    `It mainly discusses an unrelated topic instead of ${input.chapterName}.`,
+    `The segment introduces a completely different lesson from "${input.videoTitle}".`,
+    `It summarises the video without touching on the highlighted concept.`,
+  ].map(option => clamp(option));
+
+  const correctOption = clamp(
+    mainIdea || `It explains the key idea of ${input.chapterName}.`,
+  );
+
+  const options = [correctOption, ...distractors];
+
+  return {
+    stem: `What is the primary idea covered in this part of "${input.videoTitle}"?`,
+    options,
+    correctIndex: 0,
+    rationale:
+      'This option reflects the main idea described in the transcript snippet.',
+    tags: [input.chapterName, input.difficultyTarget].filter(Boolean),
+    difficulty: input.difficultyTarget,
+  };
+}
+
 const GenerateMcqOutputSchema = z.object({
   questions: z.array(
     z.object({

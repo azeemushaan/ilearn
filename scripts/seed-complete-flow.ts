@@ -273,6 +273,7 @@ async function seedCompleteFlow() {
         const segment = videoData.segments[i];
         
         const segmentRef = await db.collection(`videos/${videoRef.id}/segments`).add({
+          coachId,
           videoId: videoRef.id,
           tStartSec: segment.tStart,
           tEndSec: segment.tEnd,
@@ -289,6 +290,7 @@ async function seedCompleteFlow() {
         // Create questions
         for (const q of segment.questions) {
           await db.collection(`videos/${videoRef.id}/segments/${segmentRef.id}/questions`).add({
+            coachId,
             segmentId: segmentRef.id,
             videoId: videoRef.id,
             stem: q.stem,
