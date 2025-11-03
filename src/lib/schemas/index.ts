@@ -78,6 +78,30 @@ export const planSchema = z.object({
 
 export type Plan = z.infer<typeof planSchema> & { id: string };
 
+export const aiProviderSchema = z.enum(['google', 'openai', 'anthropic']);
+
+export const aiSettingsSchema = z.object({
+  provider: aiProviderSchema.default('google'),
+  model: z.string().min(1),
+  apiKey: z.string().nullish(),
+  activePromptId: z.string().nullish(),
+  updatedAt: nullableTimestamp,
+});
+
+export type AiProvider = z.infer<typeof aiProviderSchema>;
+export type AiSettings = z.infer<typeof aiSettingsSchema>;
+
+export const promptTemplateSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().nullish(),
+  content: z.string().min(1),
+  active: z.boolean().default(false),
+  createdAt: nullableTimestamp,
+  updatedAt: nullableTimestamp,
+});
+
+export type PromptTemplate = z.infer<typeof promptTemplateSchema> & { id: string };
+
 export const subscriptionSchema = z.object({
   coachId: z.string().min(1),
   planId: z.string().min(1),
