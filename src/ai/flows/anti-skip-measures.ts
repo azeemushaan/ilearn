@@ -8,7 +8,7 @@
  * - GenerateAttentionCheckOutput - The return type for the generateAttentionCheck function.
  */
 
-import {ai} from '@/ai/genkit';
+import {ai, aiModelName, aiRuntimeConfig} from '@/ai/genkit';
 import {z} from 'genkit';
 
 const GenerateAttentionCheckInputSchema = z.object({
@@ -40,6 +40,10 @@ const prompt = ai.definePrompt({
   Segment Summary: {{{segmentSummary}}}
 
   Attention Check Prompt:`,
+  config: {
+    model: aiModelName,
+    ...aiRuntimeConfig,
+  },
 });
 
 const generateAttentionCheckFlow = ai.defineFlow(

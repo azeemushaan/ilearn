@@ -8,7 +8,7 @@
  * - PrepareVideoContentOutput - The return type for the prepareVideoContent function.
  */
 
-import {ai} from '@/ai/genkit';
+import {ai, aiModelName, aiRuntimeConfig} from '@/ai/genkit';
 import {z} from 'genkit';
 
 const PrepareVideoContentInputSchema = z.object({
@@ -65,6 +65,8 @@ const generateMcqsPrompt = ai.definePrompt({
   Generate one MCQ based on the above information.
   `,
   config: {
+    model: aiModelName,
+    ...aiRuntimeConfig,
     safetySettings: [
       {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH'},
       {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_LOW_AND_ABOVE'},
