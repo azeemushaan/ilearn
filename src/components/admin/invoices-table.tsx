@@ -6,7 +6,7 @@ import { DataTable } from '@/components/data-table';
 import type { ColumnDef } from '@tanstack/react-table';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { updateInvoiceStatusAction } from '@/app/admin/(dashboard)/invoices/actions';
+import { updateInvoiceStatusAction } from '@/app/admin/dashboard/invoices/actions';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 

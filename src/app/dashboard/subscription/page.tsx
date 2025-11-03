@@ -33,7 +33,7 @@ const SubscriptionPage = () => {
 
   const plansCollectionRef = useMemoFirebase(() => {
     if (!firestore) return null;
-    return collection(firestore, 'subscription_plans');
+    return collection(firestore, 'plans');
   }, [firestore]);
 
   const { data: plans, isLoading: isLoadingPlans } = useCollection(plansCollectionRef);
@@ -52,7 +52,7 @@ const SubscriptionPage = () => {
       return;
     }
 
-    const isFree = (plan.priceUSD === 0 && plan.pricePKR === 0);
+    const isFree = plan.priceUSD === 0;
     if (isFree) {
         subscribeToPlan(plan, "free", "");
     } else {
@@ -91,41 +91,41 @@ const SubscriptionPage = () => {
     }
 
     try {
-      const amount = plan.currency === 'USD' ? plan.priceUSD : plan.pricePKR;
+      const amount = plan.priceUSD;
       const isFree = method === 'free';
 
       const subscriptionsCollection = collection(firestore, 'subscriptions');
-      const transactionsCollection = collection(firestore, 'transactions');
+      const paymentsCollection = collection(firestore, 'payments');
 
       // Create the subscription record first to get a reference ID
       const subscriptionDocRef = await addDoc(subscriptionsCollection, {
           coachId: coachId,
           planId: plan.id,
-          tier: plan.tier,
-          seatLimit: plan.maxStudents,
+          maxStudents: plan.maxStudents,
           status: isFree ? 'active' : 'awaiting_payment',
           currentPeriodEnd: null,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
       });
 
-      // Create a transaction record that references the subscription
-      const transactionDocRef = await addDoc(transactionsCollection, {
+      // Create a payment record that references the subscription
+      const paymentDocRef = await addDoc(paymentsCollection, {
         coachId: coachId,
-        subscriptionId: subscriptionDocRef.id,
         amount: amount,
-        currency: plan.currency,
-        method: method,
+        currency: 'USD',
+        method: isFree ? 'waiver' : 'manual_bank',
         status: isFree ? 'approved' : 'pending',
-        reference: reference,
+        reference: reference || null,
+        bankSlipUrl: null,
+        notes: null,
+        reviewedBy: null,
+        reviewedAt: null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        planId: plan.id,
-        planTitle: plan.name,
       });
 
       await updateDoc(subscriptionDocRef, {
-        transactionId: transactionDocRef.id,
+        paymentId: paymentDocRef.id,
         updatedAt: serverTimestamp(),
       });
 
@@ -162,19 +162,8 @@ const SubscriptionPage = () => {
   );
   
   const getPriceDisplay = (plan: any) => {
-    if (!plan) return '';
-    
-    // Check for new schema with specific currency prices first
-    if (plan.priceUSD === 0 && plan.pricePKR === 0) return 'Free';
-    if (plan.currency === 'USD') return `$${plan.priceUSD}`;
-    if (plan.currency === 'PKR') return `Rs${plan.pricePKR}`;
-    
-    // Fallback for old schema or undefined currency
-    if (plan.price === 0) return 'Free';
-    if (plan.price) return `$${plan.price}`;
-
-    // Default case if no price is found
-    return 'Free';
+    if (!plan || plan.priceUSD === 0) return 'Free';
+    return `$${plan.priceUSD}`;
   }
 
 
@@ -199,7 +188,7 @@ const SubscriptionPage = () => {
                 <CardTitle className="text-2xl font-headline">{plan.name}</CardTitle>
                 <div className="flex items-baseline gap-2">
                     <span className="text-4xl font-bold">{getPriceDisplay(plan)}</span>
-                    {!(plan.priceUSD === 0 && plan.pricePKR === 0) && <span className="text-muted-foreground">/ month</span>}
+                    {plan.priceUSD !== 0 && <span className="text-muted-foreground">/ month</span>}
                 </div>
                 <CardDescription>{plan.description}</CardDescription>
               </CardHeader>
@@ -210,6 +199,9 @@ const SubscriptionPage = () => {
                     <Feature included={plan.enableQuizGeneration} text="AI Quiz Generation" />
                     <Feature included={plan.enableProgressTracking} text="Progress Tracking" />
                     <Feature included={plan.enableAntiSkip} text="Anti-Skip Controls" />
+                    <Feature included={plan.enableCustomBranding} text="Custom Branding" />
+                    <Feature included={plan.enableAPIAccess} text="API Access" />
+                    <Feature included={plan.enablePrioritySupport} text="Priority Support" />
                 </ul>
               </CardContent>
               <CardFooter>

@@ -1,114 +1,126 @@
 'use client';
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth, useDoc } from "@/firebase";
-import { PlusCircle, AlertCircle } from "lucide-react";
-import Link from "next/link";
-import { collection, query, where, doc } from "firebase/firestore";
+import { useFirebaseAuth, useUser } from "@/firebase";
+import { useRouter } from "next/navigation";
+import MyAssignmentsPage from "./my-assignments/page";
+import CoachDashboard from "./coach/page";
 
 export default function DashboardPage() {
-  const firestore = useFirestore();
-  const { user, claims } = useFirebaseAuth();
+  const { claims, loadingClaims, initializing } = useFirebaseAuth();
+  const { user } = useUser();
+  const router = useRouter();
 
-  // Query for the user's active subscription in the /subscriptions collection
-  const userSubscriptionRef = useMemoFirebase(() => {
-    if (!firestore || !claims?.coachId) return null;
-    return query(
-      collection(firestore, "subscriptions"), 
-      where("coachId", "==", claims.coachId),
-      where("status", "in", ["active", "awaiting_payment"])
+  // Debug logging
+  useEffect(() => {
+    console.log('[Dashboard] Auth state:', { 
+      hasUser: !!user, 
+      initializing, 
+      loadingClaims, 
+      hasClaims: !!claims,
+      role: claims?.role 
+    });
+  }, [user, initializing, loadingClaims, claims]);
+
+  useEffect(() => {
+    // If no user after 3 seconds, redirect to login
+    if (!initializing && !user) {
+      const timer = setTimeout(() => {
+        console.log('[Dashboard] No user, redirecting to login');
+        router.push('/login');
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [user, router, initializing]);
+
+  // Wait for initial auth check
+  if (initializing) {
+    console.log('[Dashboard] Initializing auth...');
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center">
+        <p>Checking authentication...</p>
+      </div>
     );
-  }, [firestore, claims]);
+  }
 
-  const { data: subscriptions } = useCollection(userSubscriptionRef);
-  const activeSubscription = subscriptions?.[0];
+  // No user authenticated
+  if (!user) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center">
+        <p>Redirecting to login...</p>
+      </div>
+    );
+  }
 
-  // Get the details of the plan from the /subscription_plans collection
-  const planDocRef = useMemoFirebase(() => {
-    if(!firestore || !activeSubscription?.planId) return null;
-    return doc(firestore, "subscription_plans", activeSubscription.planId);
-  }, [firestore, activeSubscription]);
+  // Wait for claims to load
+  if (loadingClaims) {
+    console.log('[Dashboard] Loading claims...');
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center">
+        <p>Loading your profile...</p>
+      </div>
+    );
+  }
 
-  const { data: currentPlanData } = useDoc(planDocRef as any);
-  const currentPlan = currentPlanData as any;
+  // Claims loaded but empty or missing role
+  if (!claims || !claims.role) {
+    console.log('[Dashboard] No claims or role found:', claims);
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>Account Setup Required</CardTitle>
+            <CardDescription>Your account needs to be configured</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Your account was created but needs additional setup. Please contact support or log out and sign up again.
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={() => window.location.reload()} variant="outline" className="flex-1">
+                Refresh
+              </Button>
+              <Button onClick={async () => {
+                const auth = (await import('@/firebase/client')).auth;
+                await auth.signOut();
+                router.push('/login');
+              }} className="flex-1">
+                Sign Out
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-  // A user can create a playlist if they have an active subscription with a seat limit > 0
-  const canCreatePlaylist = activeSubscription?.status === 'active' && activeSubscription.seatLimit > 0;
+  // Route based on role
+  if (claims.role === 'student') {
+    return <MyAssignmentsPage />;
+  }
 
+  if (claims.role === 'coach') {
+    return <CoachDashboard />;
+  }
 
+  // Fallback for unknown roles
   return (
-    <div className="flex flex-1 flex-col">
-      <header className="p-4 md:p-6 border-b">
-        <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-headline font-bold">Dashboard</h1>
-            <Button className="bg-accent text-accent-foreground hover:bg-accent/90" asChild disabled={!canCreatePlaylist}>
-                <Link href="/dashboard/assign">
-                  <PlusCircle className="mr-2 h-4 w-4" />
-                  Assign New Playlist
-                </Link>
-            </Button>
-        </div>
-      </header>
-      <main className="flex-1 p-4 md:p-6">
-        <div className="grid gap-6">
-            {!activeSubscription && (
-              <Card className="bg-yellow-50 border-yellow-200">
-                <CardHeader className="flex flex-row items-center gap-4">
-                  <AlertCircle className="h-6 w-6 text-yellow-600" />
-                  <div>
-                  <CardTitle className="text-yellow-800">No Active Subscription</CardTitle>
-                  <CardDescription className="text-yellow-700">Please choose a subscription plan to access all features.</CardDescription>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Button asChild variant="link" className="p-0 text-yellow-800">
-                    <Link href="/dashboard/subscription">View Plans</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
-             {activeSubscription && activeSubscription.status === 'awaiting_payment' && (
-              <Card className="bg-blue-50 border-blue-200">
-                <CardHeader className="flex flex-row items-center gap-4">
-                  <AlertCircle className="h-6 w-6 text-blue-600" />
-                  <div>
-                  <CardTitle className="text-blue-800">Subscription Pending</CardTitle>
-                  <CardDescription className="text-blue-700">Your payment is currently being verified. This may take a few minutes.</CardDescription>
-                  </div>
-                </CardHeader>
-              </Card>
-            )}
-             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Current Plan</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-4xl font-bold">{currentPlan?.name ?? 'N/A'}</p>
-                        <p className="text-sm text-muted-foreground">{activeSubscription?.status ? `Status: ${activeSubscription.status}` : 'No active plan'}</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Students Enrolled</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-4xl font-bold">0 / {currentPlan?.maxStudents ?? 'N/A'}</p>
-                        <p className="text-sm text-muted-foreground">seats used</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Playlists Created</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="text-4xl font-bold">0 / {currentPlan?.maxPlaylists ?? 'N/A'}</p>
-                        <p className="text-sm text-muted-foreground">playlists used</p>
-                    </CardContent>
-                </Card>
-             </div>
-        </div>
-      </main>
+    <div className="flex flex-1 flex-col items-center justify-center">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Welcome!</CardTitle>
+          <CardDescription>Your account is being set up...</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            If this persists, please contact support.
+          </p>
+          <Button onClick={() => router.push('/login')} className="mt-4 w-full">
+            Return to Login
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

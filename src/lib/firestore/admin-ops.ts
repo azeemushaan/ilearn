@@ -1,22 +1,30 @@
-import { adminFirestore } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { adminFirestore, adminStorage, adminAuth } from '@/lib/firebase/admin';
 import {
+  aiProviderSchema,
+  aiSettingsSchema,
   auditSchema,
   coachSchema,
   invoiceSchema,
   paymentSchema,
   planSchema,
+  promptTemplateSchema,
   subscriptionSchema,
+  type AiProvider,
+  systemSettingsSchema,
+  systemSettingsUpdateSchema,
   type AuditEvent,
   type Coach,
   type Invoice,
   type Payment,
   type Plan,
+  type PromptTemplate,
   type Subscription,
+  type SystemSettings,
 } from '@/lib/schemas';
 
-function nowTimestamp() {
-  return Timestamp.now();
+function nowTimestamp(date?: Date) {
+  return date ? Timestamp.fromDate(date) : Timestamp.now();
 }
 
 function withAudit(base: Partial<AuditEvent>) {
@@ -28,42 +36,418 @@ function withAudit(base: Partial<AuditEvent>) {
 
 export async function listCoaches(): Promise<Coach[]> {
   const snapshot = await adminFirestore().collection('coaches').get();
-  return snapshot.docs.map((doc) => coachSchema.parse({ ...doc.data(), id: doc.id }));
+  return snapshot.docs.map((doc) => ({
+    ...coachSchema.parse(doc.data()),
+    id: doc.id,
+  }));
+}
+
+export async function createCoach(data: Omit<Coach, 'id' | 'createdAt' | 'updatedAt'>, actorId: string) {
+  const validated = coachSchema.omit({ createdAt: true, updatedAt: true }).parse(data);
+  const payload = {
+    ...validated,
+    createdAt: nowTimestamp(),
+    updatedAt: nowTimestamp(),
+  };
+  const ref = await adminFirestore().collection('coaches').add(payload);
+  await writeAudit({
+    actorId,
+    action: 'coach.create',
+    target: { collection: 'coaches', id: ref.id },
+    coachId: ref.id,
+    meta: validated,
+  });
+  return ref.id;
+}
+
+export async function updateCoach(id: string, data: Partial<Coach>, actorId: string) {
+  const docRef = adminFirestore().collection('coaches').doc(id);
+  const snapshot = await docRef.get();
+  if (!snapshot.exists) throw new Error('Coach not found');
+  const merged = coachSchema.partial().parse(data);
+  await docRef.update({ ...merged, updatedAt: nowTimestamp() });
+  await writeAudit({
+    actorId,
+    action: 'coach.update',
+    target: { collection: 'coaches', id },
+    coachId: id,
+    meta: data,
+  });
 }
 
 export async function listPlans(): Promise<Plan[]> {
   const snapshot = await adminFirestore().collection('plans').orderBy('sort', 'asc').get();
-  return snapshot.docs.map((doc) => planSchema.parse({ ...doc.data(), id: doc.id }));
+  return snapshot.docs.map((doc) => ({
+    ...planSchema.parse(doc.data()),
+    id: doc.id,
+  }));
 }
-
-export type SystemSettings = {
-  manualPaymentsEnabled: boolean;
-  supportEmail: string;
-  branding: {
-    logoUrl?: string | null;
-  };
-};
-
-const defaultSettings: SystemSettings = {
-  manualPaymentsEnabled: true,
-  supportEmail: 'support@example.com',
-  branding: {},
-};
 
 export async function getSystemSettings(): Promise<SystemSettings> {
   const doc = await adminFirestore().collection('settings').doc('system').get();
-  if (!doc.exists) return defaultSettings;
-  return { ...defaultSettings, ...doc.data() } as SystemSettings;
+  if (!doc.exists) {
+    return systemSettingsSchema.parse({});
+  }
+  return systemSettingsSchema.parse(doc.data() ?? {});
 }
 
 export async function updateSystemSettings(settings: Partial<SystemSettings>, actorId: string) {
-  const payload = { ...settings, updatedAt: nowTimestamp() };
+  const parsed = systemSettingsUpdateSchema.parse(settings);
+  const payload = { ...parsed, updatedAt: nowTimestamp() };
   await adminFirestore().collection('settings').doc('system').set(payload, { merge: true });
   await writeAudit({
     actorId,
     action: 'settings.update',
     target: { collection: 'settings', id: 'system' },
     meta: settings,
+  });
+}
+
+const aiProviderValues = aiProviderSchema.options as readonly AiProvider[];
+
+const defaultAiSettings: { provider: AiProvider; model: string; activePromptId: string | null } = {
+  provider: 'google',
+  model: 'googleai/gemini-2.5-flash',
+  activePromptId: null,
+};
+
+export type SystemAiSettings = {
+  provider: AiProvider;
+  model: string;
+  activePromptId: string | null;
+  apiKeyMask: string | null;
+  hasApiKey: boolean;
+};
+
+function maskApiKey(apiKey: string) {
+  if (!apiKey) return null;
+  const trimmed = apiKey.trim();
+  if (trimmed.length <= 8) return '••••';
+  const start = trimmed.slice(0, 4);
+  const end = trimmed.slice(-4);
+  return `${start}••••${end}`;
+}
+
+export async function getSystemAiSettings(): Promise<SystemAiSettings> {
+  const doc = await adminFirestore().collection('settings').doc('system.ai').get();
+  if (!doc.exists) {
+    return {
+      provider: defaultAiSettings.provider,
+      model: defaultAiSettings.model,
+      activePromptId: defaultAiSettings.activePromptId,
+      apiKeyMask: null,
+      hasApiKey: false,
+    } satisfies SystemAiSettings;
+  }
+
+  const data = aiSettingsSchema.partial().parse(doc.data() ?? {});
+  const provider = aiProviderValues.includes(data.provider as AiProvider)
+    ? (data.provider as AiProvider)
+    : defaultAiSettings.provider;
+  const model = typeof data.model === 'string' && data.model.length > 0
+    ? data.model
+    : defaultAiSettings.model;
+  const activePromptId = typeof data.activePromptId === 'string' && data.activePromptId.length > 0
+    ? data.activePromptId
+    : null;
+  const apiKey = typeof data.apiKey === 'string' ? data.apiKey : null;
+
+  return {
+    provider,
+    model,
+    activePromptId,
+    apiKeyMask: maskApiKey(apiKey ?? ''),
+    hasApiKey: Boolean(apiKey),
+  } satisfies SystemAiSettings;
+}
+
+type UpdateAiSettingsInput = Partial<{
+  provider: AiProvider;
+  model: string;
+  apiKey: string | null;
+  activePromptId: string | null;
+}>;
+
+export async function updateSystemAiSettings(settings: UpdateAiSettingsInput, actorId: string) {
+  const firestore = adminFirestore();
+  const payload: Record<string, unknown> = {
+    updatedAt: nowTimestamp(),
+  };
+
+  if (settings.provider && aiProviderValues.includes(settings.provider)) {
+    payload.provider = settings.provider;
+  }
+
+  if (typeof settings.model === 'string' && settings.model.trim()) {
+    payload.model = settings.model.trim();
+  }
+
+  if (settings.apiKey !== undefined) {
+    const sanitized = settings.apiKey && settings.apiKey.trim().length > 0 ? settings.apiKey.trim() : null;
+    payload.apiKey = sanitized;
+  }
+
+  if ('activePromptId' in settings) {
+    payload.activePromptId = settings.activePromptId ?? null;
+    await setActivePromptTemplate(settings.activePromptId ?? null, actorId, { updateSettingsDocument: false });
+  }
+
+  await firestore.collection('settings').doc('system.ai').set(payload, { merge: true });
+
+  const meta: Record<string, unknown> = {};
+  if (payload.provider) meta.provider = payload.provider;
+  if (payload.model) meta.model = payload.model;
+  if ('apiKey' in payload) meta.apiKeyUpdated = Boolean(payload.apiKey);
+  if ('activePromptId' in payload) meta.activePromptId = payload.activePromptId;
+
+  await writeAudit({
+    actorId,
+    action: 'settings.ai.update',
+    target: { collection: 'settings', id: 'system.ai' },
+    meta,
+  });
+}
+
+export async function listPromptTemplates(): Promise<PromptTemplate[]> {
+  const snapshot = await adminFirestore().collection('prompts').orderBy('updatedAt', 'desc').get();
+  return snapshot.docs.map((doc) => ({
+    ...promptTemplateSchema.parse(doc.data()),
+    id: doc.id,
+  }));
+}
+
+export async function getPromptTemplate(id: string): Promise<PromptTemplate | null> {
+  const doc = await adminFirestore().collection('prompts').doc(id).get();
+  if (!doc.exists) return null;
+  return { ...promptTemplateSchema.parse(doc.data()), id: doc.id };
+}
+
+export async function getActivePromptTemplate(
+  aiSettings?: SystemAiSettings,
+): Promise<PromptTemplate | null> {
+  const settings = aiSettings ?? (await getSystemAiSettings());
+  if (settings.activePromptId) {
+    const fromSettings = await getPromptTemplate(settings.activePromptId);
+    if (fromSettings) return fromSettings;
+  }
+
+  const snapshot = await adminFirestore().collection('prompts').where('active', '==', true).limit(1).get();
+  if (!snapshot.empty) {
+    const doc = snapshot.docs[0];
+    return { ...promptTemplateSchema.parse(doc.data()), id: doc.id };
+  }
+
+  return null;
+}
+
+type PromptTemplatePayload = {
+  name: string;
+  description?: string | null;
+  content: string;
+  active?: boolean;
+};
+
+export async function createPromptTemplate(data: PromptTemplatePayload, actorId: string) {
+  const firestore = adminFirestore();
+  const name = data.name.trim();
+  const content = data.content.trim();
+
+  if (!name) {
+    throw new Error('Prompt name is required');
+  }
+
+  if (!content) {
+    throw new Error('Prompt content is required');
+  }
+
+  const now = nowTimestamp();
+  const payload = {
+    name,
+    description: data.description?.trim() || null,
+    content,
+    active: Boolean(data.active),
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const ref = await firestore.collection('prompts').add(payload);
+
+  await writeAudit({
+    actorId,
+    action: 'prompt.create',
+    target: { collection: 'prompts', id: ref.id },
+    meta: { name: payload.name, active: payload.active },
+  });
+
+  if (payload.active) {
+    await setActivePromptTemplate(ref.id, actorId);
+  }
+
+  return ref.id;
+}
+
+export async function updatePromptTemplate(
+  id: string,
+  data: Partial<PromptTemplatePayload>,
+  actorId: string,
+) {
+  const firestore = adminFirestore();
+  const docRef = firestore.collection('prompts').doc(id);
+  const snapshot = await docRef.get();
+  if (!snapshot.exists) throw new Error('Prompt template not found');
+
+  const current = promptTemplateSchema.parse({ ...snapshot.data(), id });
+  const updates: Record<string, unknown> = { updatedAt: nowTimestamp() };
+
+  if (typeof data.name === 'string') {
+    const trimmed = data.name.trim();
+    if (!trimmed) throw new Error('Prompt name cannot be empty');
+    updates.name = trimmed;
+  }
+
+  if (data.description !== undefined) {
+    const trimmed = data.description ? data.description.trim() : null;
+    updates.description = trimmed;
+  }
+
+  if (typeof data.content === 'string') {
+    const trimmed = data.content.trim();
+    if (!trimmed) throw new Error('Prompt content cannot be empty');
+    updates.content = trimmed;
+  }
+
+  if (typeof data.active === 'boolean') {
+    updates.active = data.active;
+  }
+
+  await docRef.update(updates);
+
+  await writeAudit({
+    actorId,
+    action: 'prompt.update',
+    target: { collection: 'prompts', id },
+    meta: updates,
+  });
+
+  if (data.active === true) {
+    await setActivePromptTemplate(id, actorId);
+  } else if (data.active === false && current.active) {
+    await setActivePromptTemplate(null, actorId);
+  }
+}
+
+export async function deletePromptTemplate(id: string, actorId: string) {
+  const firestore = adminFirestore();
+  const docRef = firestore.collection('prompts').doc(id);
+  const snapshot = await docRef.get();
+  if (!snapshot.exists) return;
+
+  const current = promptTemplateSchema.parse({ ...snapshot.data(), id });
+  await docRef.delete();
+
+  await writeAudit({
+    actorId,
+    action: 'prompt.delete',
+    target: { collection: 'prompts', id },
+    meta: { name: current.name },
+  });
+
+  if (current.active) {
+    await setActivePromptTemplate(null, actorId);
+  }
+}
+
+type SetActivePromptTemplateOptions = {
+  updateSettingsDocument?: boolean;
+};
+
+export async function setActivePromptTemplate(
+  id: string | null,
+  actorId: string,
+  options: SetActivePromptTemplateOptions = {},
+) {
+  const firestore = adminFirestore();
+  const prompts = firestore.collection('prompts');
+  const now = nowTimestamp();
+  const batch = firestore.batch();
+  let hasUpdates = false;
+
+  const activeSnap = await prompts.where('active', '==', true).get();
+  activeSnap.docs.forEach((doc) => {
+    if (!id || doc.id !== id) {
+      batch.update(doc.ref, { active: false, updatedAt: now });
+      hasUpdates = true;
+    }
+  });
+
+  if (id) {
+    const targetRef = prompts.doc(id);
+    const targetDoc = await targetRef.get();
+    if (!targetDoc.exists) {
+      throw new Error('Prompt template not found');
+    }
+    const targetData = promptTemplateSchema.parse({ ...targetDoc.data(), id });
+    if (!targetData.active) {
+      batch.update(targetRef, { active: true, updatedAt: now });
+      hasUpdates = true;
+    } else {
+      batch.update(targetRef, { updatedAt: now });
+      hasUpdates = true;
+    }
+  }
+
+  if (hasUpdates) {
+    await batch.commit();
+  }
+
+  if (options.updateSettingsDocument !== false) {
+    await firestore
+      .collection('settings')
+      .doc('system.ai')
+      .set({ activePromptId: id ?? null, updatedAt: nowTimestamp() }, { merge: true });
+  }
+
+  await writeAudit({
+    actorId,
+    action: 'prompt.setActive',
+    target: { collection: 'prompts', id: id ?? 'default-template' },
+    meta: { activePromptId: id },
+  });
+}
+
+type PromptUsageLog = {
+  promptId: string | null;
+  status: 'success' | 'error';
+  videoTitle: string;
+  chapterName: string;
+  difficulty: string;
+  locale?: string;
+  coachId?: string | null;
+  videoId?: string | null;
+  usedFallback: boolean;
+  provider?: string;
+  model?: string;
+  errorMessage?: string;
+};
+
+export async function recordPromptUsage(event: PromptUsageLog) {
+  await writeAudit({
+    actorId: 'system',
+    coachId: event.coachId ?? undefined,
+    action: 'prompt.usage',
+    target: { collection: 'prompts', id: event.promptId ?? 'default-template' },
+    meta: {
+      status: event.status,
+      videoTitle: event.videoTitle,
+      chapterName: event.chapterName,
+      difficulty: event.difficulty,
+      locale: event.locale,
+      videoId: event.videoId,
+      usedFallback: event.usedFallback,
+      provider: event.provider,
+      model: event.model,
+      errorMessage: event.errorMessage,
+    },
   });
 }
 
@@ -121,7 +505,28 @@ export async function activatePlan(id: string, actorId: string) {
 
 export async function listSubscriptions(): Promise<Subscription[]> {
   const snapshot = await adminFirestore().collection('subscriptions').get();
-  return snapshot.docs.map((doc) => subscriptionSchema.parse({ ...doc.data(), id: doc.id }));
+  return snapshot.docs.map((doc) => ({
+    ...subscriptionSchema.parse(doc.data()),
+    id: doc.id,
+  }));
+}
+
+export async function createSubscription(data: Omit<Subscription, 'id' | 'createdAt' | 'updatedAt'>, actorId: string) {
+  const validated = subscriptionSchema.omit({ createdAt: true, updatedAt: true }).parse(data);
+  const payload = {
+    ...validated,
+    createdAt: nowTimestamp(),
+    updatedAt: nowTimestamp(),
+  };
+  const ref = await adminFirestore().collection('subscriptions').add(payload);
+  await writeAudit({
+    actorId,
+    action: 'subscription.create',
+    target: { collection: 'subscriptions', id: ref.id },
+    coachId: validated.coachId,
+    meta: validated,
+  });
+  return ref.id;
 }
 
 export async function updateSubscription(id: string, patch: Partial<Subscription>, actorId: string) {
@@ -130,11 +535,10 @@ export async function updateSubscription(id: string, patch: Partial<Subscription
   if (!snapshot.exists) throw new Error('Subscription not found');
   const current = subscriptionSchema.parse({ ...snapshot.data(), id });
   const payload = subscriptionSchema.partial().parse(patch);
-  if (payload.seatLimit && payload.seatLimit < current.seatLimit) {
-    // Seat limit enforcement handled in Cloud Function, but we double check here
+  if (payload.maxStudents && payload.maxStudents < current.maxStudents) {
     const coachUsers = await adminFirestore().collection('users').where('coachId', '==', current.coachId).where('status', '==', 'active').get();
-    if (payload.seatLimit < coachUsers.size) {
-      throw new Error(`Cannot reduce seat limit below active user count (${coachUsers.size}).`);
+    if (payload.maxStudents < coachUsers.size) {
+      throw new Error(`Cannot reduce student limit below active user count (${coachUsers.size}).`);
     }
   }
   await docRef.update({ ...payload, updatedAt: nowTimestamp() });
@@ -156,7 +560,27 @@ export async function listPayments(status?: string): Promise<Payment[]> {
     query = query.where('status', '==', status);
   }
   const snapshot = await query.limit(200).get();
-  return snapshot.docs.map((doc) => paymentSchema.parse({ ...doc.data(), id: doc.id }));
+  const payments = await Promise.all(
+    snapshot.docs.map(async (doc) => {
+      const payment = { ...paymentSchema.parse(doc.data()), id: doc.id };
+      if (payment.bankSlipUrl && payment.bankSlipUrl.startsWith('gs://')) {
+        try {
+          const path = payment.bankSlipUrl.replace(/^gs:\/\/[^\/]+\//, '');
+          const file = adminStorage().bucket().file(path);
+          const [url] = await file.getSignedUrl({
+            action: 'read',
+            expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+          });
+          return { ...payment, bankSlipUrl: url };
+        } catch (error) {
+          console.error('Failed to get signed URL for bank slip:', error);
+          return payment;
+        }
+      }
+      return payment;
+    })
+  );
+  return payments;
 }
 
 export async function approvePayment(
@@ -171,12 +595,45 @@ export async function approvePayment(
   if (!snapshot.exists) throw new Error('Payment not found');
   const payment = paymentSchema.parse({ ...snapshot.data(), id });
   if (payment.status === 'approved') return payment;
-  await docRef.update({ status: 'approved', notes, reviewedBy: actorId, reviewedAt: nowTimestamp(), updatedAt: nowTimestamp() });
+  
+  // Update payment status
+  const updateData: any = {
+    status: 'approved',
+    reviewedBy: actorId,
+    reviewedAt: nowTimestamp(),
+    updatedAt: nowTimestamp(),
+  };
+  
+  if (notes) {
+    updateData.notes = notes;
+  }
+  
+  await docRef.update(updateData);
+  
+  // Find and activate the associated subscription
+  const subscriptionsSnap = await db.collection('subscriptions')
+    .where('coachId', '==', payment.coachId)
+    .where('paymentId', '==', id)
+    .limit(1)
+    .get();
+  
+  if (!subscriptionsSnap.empty) {
+    const subscriptionDoc = subscriptionsSnap.docs[0];
+    const oneYearFromNow = new Date();
+    oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+    
+    await subscriptionDoc.ref.update({
+      status: 'active',
+      currentPeriodEnd: nowTimestamp(oneYearFromNow),
+      updatedAt: nowTimestamp(),
+    });
+  }
+  
   await audit({
     actorId,
     action: 'payment.approved',
     target: { collection: 'payments', id },
-    meta: { notes },
+    meta: notes ? { notes } : {},
   });
   return payment;
 }
@@ -197,7 +654,10 @@ export async function rejectPayment(id: string, actorId: string, notes: string) 
 
 export async function listInvoices(): Promise<Invoice[]> {
   const snapshot = await adminFirestore().collection('invoices').orderBy('createdAt', 'desc').limit(200).get();
-  return snapshot.docs.map((doc) => invoiceSchema.parse({ ...doc.data(), id: doc.id }));
+  return snapshot.docs.map((doc) => ({
+    ...invoiceSchema.parse(doc.data()),
+    id: doc.id,
+  }));
 }
 
 export async function upsertInvoice(id: string | null, data: Partial<Invoice>, actorId: string) {
@@ -263,6 +723,164 @@ export async function enableCoach(coachId: string, actorId: string) {
     coachId,
     target: { collection: 'coaches', id: coachId },
   });
+}
+
+/**
+ * Completely deletes a coach and all associated data
+ * This includes:
+ * - Coach document
+ * - All users (students) associated with the coach
+ * - All subscriptions
+ * - All payments
+ * - All invoices
+ * - All playlists
+ * - All videos
+ * - All assignments
+ * - All progress records
+ * - All attempts
+ * - Firebase Auth accounts for associated users
+ * - Storage files (bank slips, etc.)
+ */
+export async function deleteCoach(coachId: string, actorId: string) {
+  const firestore = adminFirestore();
+  const auth = adminAuth();
+  const storage = adminStorage();
+  
+  console.log(`[DELETE COACH] Starting deletion for coach: ${coachId}`);
+  
+  try {
+    // 1. Get all users associated with this coach
+    const usersSnap = await firestore.collection('users').where('coachId', '==', coachId).get();
+    const userIds = usersSnap.docs.map(doc => doc.id);
+    console.log(`[DELETE COACH] Found ${userIds.length} users to delete`);
+    
+    // 2. Delete Firebase Auth accounts for all users
+    for (const uid of userIds) {
+      try {
+        await auth.deleteUser(uid);
+        console.log(`[DELETE COACH] Deleted auth account: ${uid}`);
+      } catch (error: any) {
+        // User might not exist in auth, continue
+        console.warn(`[DELETE COACH] Could not delete auth for ${uid}:`, error.message);
+      }
+    }
+    
+    // 3. Delete all Firestore data in batches (Firestore batch limit is 500)
+    const deleteInBatches = async (collectionName: string, query: any) => {
+      const snapshot = await query.get();
+      if (snapshot.empty) return 0;
+      
+      const batches = [];
+      let currentBatch = firestore.batch();
+      let operationCount = 0;
+      
+      for (const doc of snapshot.docs) {
+        currentBatch.delete(doc.ref);
+        operationCount++;
+        
+        if (operationCount === 500) {
+          batches.push(currentBatch.commit());
+          currentBatch = firestore.batch();
+          operationCount = 0;
+        }
+      }
+      
+      if (operationCount > 0) {
+        batches.push(currentBatch.commit());
+      }
+      
+      await Promise.all(batches);
+      return snapshot.size;
+    };
+    
+    // Delete collections associated with coach
+    const deletedUsers = await deleteInBatches('users', firestore.collection('users').where('coachId', '==', coachId));
+    console.log(`[DELETE COACH] Deleted ${deletedUsers} user documents`);
+    
+    const deletedSubscriptions = await deleteInBatches('subscriptions', firestore.collection('subscriptions').where('coachId', '==', coachId));
+    console.log(`[DELETE COACH] Deleted ${deletedSubscriptions} subscriptions`);
+    
+    const deletedPayments = await deleteInBatches('payments', firestore.collection('payments').where('coachId', '==', coachId));
+    console.log(`[DELETE COACH] Deleted ${deletedPayments} payments`);
+    
+    const deletedInvoices = await deleteInBatches('invoices', firestore.collection('invoices').where('coachId', '==', coachId));
+    console.log(`[DELETE COACH] Deleted ${deletedInvoices} invoices`);
+    
+    // Delete LMS-related data
+    const deletedPlaylists = await deleteInBatches('playlists', firestore.collection('playlists').where('coachId', '==', coachId));
+    console.log(`[DELETE COACH] Deleted ${deletedPlaylists} playlists`);
+    
+    const deletedVideos = await deleteInBatches('videos', firestore.collection('videos').where('coachId', '==', coachId));
+    console.log(`[DELETE COACH] Deleted ${deletedVideos} videos`);
+    
+    const deletedAssignments = await deleteInBatches('assignments', firestore.collection('assignments').where('coachId', '==', coachId));
+    console.log(`[DELETE COACH] Deleted ${deletedAssignments} assignments`);
+    
+    // Delete student progress and attempts
+    for (const userId of userIds) {
+      const deletedProgress = await deleteInBatches('progress', firestore.collection('progress').where('studentId', '==', userId));
+      const deletedAttempts = await deleteInBatches('attempts', firestore.collection('attempts').where('studentId', '==', userId));
+      console.log(`[DELETE COACH] Deleted ${deletedProgress} progress records and ${deletedAttempts} attempts for user ${userId}`);
+    }
+    
+    // Delete segments, questions, and invitations
+    const videosForSegments = await firestore.collection('videos').where('coachId', '==', coachId).get();
+    for (const videoDoc of videosForSegments.docs) {
+      const deletedSegments = await deleteInBatches('segments', firestore.collection('segments').where('videoId', '==', videoDoc.id));
+      const deletedQuestions = await deleteInBatches('questions', firestore.collection('questions').where('videoId', '==', videoDoc.id));
+      console.log(`[DELETE COACH] Deleted ${deletedSegments} segments and ${deletedQuestions} questions for video ${videoDoc.id}`);
+    }
+    
+    const deletedInvitations = await deleteInBatches('invitations', firestore.collection('invitations').where('coachId', '==', coachId));
+    console.log(`[DELETE COACH] Deleted ${deletedInvitations} invitations`);
+    
+    // 4. Delete storage files (bank slips, receipts, etc.)
+    try {
+      const bucket = storage.bucket();
+      const [files] = await bucket.getFiles({ prefix: `coaches/${coachId}/` });
+      if (files.length > 0) {
+        await Promise.all(files.map(file => file.delete()));
+        console.log(`[DELETE COACH] Deleted ${files.length} storage files`);
+      }
+      
+      // Delete bank slips
+      const [bankSlips] = await bucket.getFiles({ prefix: `bank-slips/${coachId}/` });
+      if (bankSlips.length > 0) {
+        await Promise.all(bankSlips.map(file => file.delete()));
+        console.log(`[DELETE COACH] Deleted ${bankSlips.length} bank slip files`);
+      }
+    } catch (error: any) {
+      console.warn(`[DELETE COACH] Could not delete storage files:`, error.message);
+    }
+    
+    // 5. Finally, delete the coach document itself
+    await firestore.collection('coaches').doc(coachId).delete();
+    console.log(`[DELETE COACH] Deleted coach document`);
+    
+    // 6. Write audit log
+    await writeAudit({
+      actorId,
+      action: 'coach.delete',
+      coachId,
+      target: { collection: 'coaches', id: coachId },
+      meta: {
+        deletedUsers,
+        deletedSubscriptions,
+        deletedPayments,
+        deletedInvoices,
+        deletedPlaylists,
+        deletedVideos,
+        deletedAssignments,
+        deletedInvitations,
+        userIds,
+      },
+    });
+    
+    console.log(`[DELETE COACH] Successfully deleted coach ${coachId} and all associated data`);
+  } catch (error) {
+    console.error(`[DELETE COACH] Error deleting coach ${coachId}:`, error);
+    throw new Error(`Failed to delete coach: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 export async function listAudit(limit = 200) {

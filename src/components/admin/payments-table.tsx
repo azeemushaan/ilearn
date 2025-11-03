@@ -6,15 +6,12 @@ import { DataTable } from '@/components/data-table';
 import type { ColumnDef } from '@tanstack/react-table';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { approvePaymentAction, rejectPaymentAction } from '@/app/admin/(dashboard)/payments/actions';
+import { approvePaymentAction, rejectPaymentAction } from '@/app/admin/dashboard/payments/actions';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/hooks/use-toast';
+import { Check, X } from 'lucide-react';
 
 export function PaymentsTable({ payments, coaches }: { payments: Payment[]; coaches: Coach[] }) {
-  const [selected, setSelected] = useState<Payment | null>(null);
-  const [notes, setNotes] = useState('');
   const [pending, startTransition] = useTransition();
   const [filter, setFilter] = useState<string>('');
   const [status, setStatus] = useState<string>('');
@@ -42,7 +39,11 @@ export function PaymentsTable({ payments, coaches }: { payments: Payment[]; coac
     {
       accessorKey: 'status',
       header: 'Status',
-      cell: ({ row }) => <Badge variant="outline">{row.original.status}</Badge>,
+      cell: ({ row }) => {
+        const status = row.original.status;
+        const variant = status === 'approved' ? 'default' : status === 'rejected' ? 'destructive' : 'secondary';
+        return <Badge variant={variant}>{status}</Badge>;
+      },
     },
     { accessorKey: 'reference', header: 'Reference' },
     {
@@ -50,15 +51,51 @@ export function PaymentsTable({ payments, coaches }: { payments: Payment[]; coac
       header: 'Created',
       cell: ({ row }) => formatDate(row.original.createdAt),
     },
+    {
+      id: 'actions',
+      header: 'Actions',
+      cell: ({ row }) => {
+        const payment = row.original;
+        if (payment.status !== 'pending') return null;
+        return (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="default"
+              className="bg-green-600 hover:bg-green-700"
+              disabled={pending}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleApprove(payment as unknown as Payment);
+              }}
+            >
+              <Check className="h-4 w-4 mr-1" />
+              Approve
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={pending}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleReject(payment as unknown as Payment);
+              }}
+            >
+              <X className="h-4 w-4 mr-1" />
+              Reject
+            </Button>
+          </div>
+        );
+      },
+    },
   ];
 
   const handleApprove = (payment: Payment) => {
+    if (payment.status !== 'pending') return;
     startTransition(async () => {
       try {
-        await approvePaymentAction(payment.id, notes || undefined);
-        toast({ title: 'Payment approved', description: payment.reference ?? payment.id });
-        setSelected(null);
-        setNotes('');
+        await approvePaymentAction(payment.id);
+        toast({ title: 'Payment approved', description: `Transaction ${payment.reference} approved successfully` });
       } catch (error) {
         toast({ title: 'Approval failed', description: (error as Error).message, variant: 'destructive' });
       }
@@ -66,16 +103,14 @@ export function PaymentsTable({ payments, coaches }: { payments: Payment[]; coac
   };
 
   const handleReject = (payment: Payment) => {
-    if (!notes.trim()) {
-      toast({ title: 'Rejection notes required', variant: 'destructive' });
-      return;
-    }
+    if (payment.status !== 'pending') return;
+    const reason = prompt('Enter rejection reason:');
+    if (!reason?.trim()) return;
+    
     startTransition(async () => {
       try {
-        await rejectPaymentAction(payment.id, notes);
-        toast({ title: 'Payment rejected', description: payment.reference ?? payment.id });
-        setSelected(null);
-        setNotes('');
+        await rejectPaymentAction(payment.id, reason);
+        toast({ title: 'Payment rejected', description: `Transaction ${payment.reference} rejected` });
       } catch (error) {
         toast({ title: 'Rejection failed', description: (error as Error).message, variant: 'destructive' });
       }
@@ -98,61 +133,7 @@ export function PaymentsTable({ payments, coaches }: { payments: Payment[]; coac
           <option value="rejected">Rejected</option>
         </select>
       </div>
-      <DataTable columns={columns} data={filtered} searchAccessor="coachName" onRowClick={(row) => setSelected(row as unknown as Payment)} />
-      <Dialog open={!!selected} onOpenChange={(open) => {
-        if (!open) setSelected(null);
-      }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Manual payment approval</DialogTitle>
-          </DialogHeader>
-          {selected && (
-            <div className="space-y-4">
-              <div className="grid gap-2 text-sm">
-                <div className="flex justify-between">
-                  <span>Coach</span>
-                  <span className="font-medium">{selected.coachId}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Amount</span>
-                  <span>{formatCurrency(selected.amount, selected.currency)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Reference</span>
-                  <span>{selected.reference ?? '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Status</span>
-                  <Badge>{selected.status}</Badge>
-                </div>
-              </div>
-              {selected.bankSlipUrl && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold">Bank slip</h3>
-                  <div className="overflow-hidden rounded border">
-                    <img src={selected.bankSlipUrl} alt="Bank slip" className="max-h-64 w-full object-contain" />
-                  </div>
-                </div>
-              )}
-              <div>
-                <label className="text-sm font-medium">Review notes</label>
-                <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Notes for the coach" />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setSelected(null)}>
-                  Close
-                </Button>
-                <Button variant="destructive" disabled={pending} onClick={() => selected && handleReject(selected)}>
-                  Reject
-                </Button>
-                <Button disabled={pending} onClick={() => selected && handleApprove(selected)}>
-                  Approve
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <DataTable columns={columns} data={filtered} searchAccessor="coachName" />
     </div>
   );
 }

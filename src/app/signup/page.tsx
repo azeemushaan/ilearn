@@ -34,14 +34,31 @@ export default function SignupPage() {
   const handleLoginSuccess = async (user: User) => {
     if (!auth) return;
     
-    await user.getIdToken(true); // Force refresh
-    const tokenResult = await user.getIdTokenResult();
-    const claims = tokenResult.claims;
+    try {
+      const idToken = await user.getIdToken(true);
+      
+      // Create session cookie
+      const response: Response = await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to create session');
+      }
+      
+      const tokenResult = await user.getIdTokenResult(true);
+      const claims = tokenResult.claims;
 
-    if (claims.role === 'admin') {
-        router.push("/admin/dashboard");
-    } else {
-        router.push("/dashboard");
+      if (claims.role === 'admin') {
+        window.location.href = "/admin/dashboard";
+      } else {
+        window.location.href = "/dashboard";
+      }
+    } catch (error) {
+      console.error('Session creation error:', error);
+      throw error;
     }
   };
 
@@ -51,18 +68,30 @@ export default function SignupPage() {
     const userRef = doc(firestore, "users", user.uid);
     const userDoc = await getDoc(userRef);
 
-    // If user document already exists, don't overwrite claims or coach.
+    // If user document already exists, just refresh claims
     if(userDoc.exists()) {
-        console.log("User document already exists. Skipping creation.");
+        console.log("User document already exists. Refreshing claims.");
+        const userData = userDoc.data();
+        // Refresh custom claims
+        const claimsResult = await setUserClaims({
+            uid: user.uid,
+            claims: { role: userData.role, coachId: userData.coachId }
+        });
+        
+        if (!claimsResult.success) {
+          throw new Error(`Failed to refresh custom claims: ${claimsResult.message}`);
+        }
+        
+        // Wait for claims to propagate
+        await new Promise(resolve => setTimeout(resolve, 2000));
         return;
     }
 
     const isSpecialAdmin = user.email?.toLowerCase() === 'ilearn@er21.org';
-    const role = isSpecialAdmin ? 'admin' : 'teacher';
+    const role = isSpecialAdmin ? 'admin' : 'coach';
     let coachId: string;
 
     if (isSpecialAdmin) {
-        // The admin user is their own coach.
         coachId = user.uid;
         const coachRef = doc(firestore, "coaches", coachId);
         await setDoc(coachRef, {
@@ -72,7 +101,6 @@ export default function SignupPage() {
             updatedAt: serverTimestamp(),
         }, { merge: true });
     } else {
-        // For a regular teacher, create a new coach document and use its ID
         const newCoachRef = await addDoc(collection(firestore, "coaches"), {
              displayName: displayName,
              email: user.email,
@@ -105,6 +133,10 @@ export default function SignupPage() {
     if (!claimsResult.success) {
       throw new Error(`Failed to set custom claims: ${claimsResult.message}`);
     }
+    
+    // Wait for claims to propagate and force token refresh
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await user.getIdToken(true); // Force refresh token
   }
 
   const handleGoogleSignup = async () => {
@@ -160,8 +192,8 @@ export default function SignupPage() {
               <Logo />
             </Link>
           </div>
-          <CardTitle className="font-headline text-2xl">Create an account</CardTitle>
-          <CardDescription>Enter your information to get started</CardDescription>
+          <CardTitle className="font-headline text-2xl">Create a Coach Account</CardTitle>
+          <CardDescription>Enter your information to start teaching</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4">
@@ -199,6 +231,12 @@ export default function SignupPage() {
             Already have an account?{" "}
             <Link href="/login" className="underline text-primary">
               Login
+            </Link>
+          </div>
+          <div className="text-center text-sm text-muted-foreground mt-2">
+            Student?{" "}
+            <Link href="/signup-student" className="underline text-blue-600">
+              Sign up with invite code
             </Link>
           </div>
         </CardContent>

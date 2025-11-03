@@ -1,0 +1,370 @@
+﻿iLearn (by ER21) System Architecture (Google Stack)
+
+The purpose of the platform is to allow users (teachers) to assign training or educational videos especially from youtube (More specifically a playlist) to users(ie students) and track if the videos were watched. The key features include intelligent video pause, quizzes during playback, AI-generated questions, and progress tracking. The LLM will automatically generate questions 
+
+Sections I want on the landing page:
+Hero Section with a clear headline, subheadline, and a call-to-action (CTA) button like “Try It Free” or “Assign Your First Video” (leading to signup page)
+
+
+How It Works section: show 3 steps — “Upload Video”, “Add Questions”, “Track Performance”
+
+
+Features grid: AI questions, viewer analytics, progress tracker, anti-skip lock, viewer notes, admin panel
+
+
+Testimonials or client trust section
+
+
+Pricing Plans: Free, Pro, and Enterprise tiers
+
+
+FAQ Section
+
+
+Footer with links to terms, privacy policy, and contact
+
+
+Style it with a modern UI/UX, similar to platforms like Loom, Notion, or Linear.
+Use soft shadows, rounded corners, gradient CTAs, and engaging illustrations or icons.
+Responsive design for mobile & desktop.
+Optional: Animate the headline or steps using Framer Motion or CSS transitions."
+
+
+1) Goals & guardrails
+* Core use-case: Teachers assign YouTube playlists → Students watch → Player auto-pauses every 60–120s at concept boundaries → AI-generated MCQs → progress & mastery tracking.
+
+* Constraints: Low-latency UX, low dev-ops overhead, scale to 100k+ students, safe API usage (YouTube terms), works in Pakistan (spotty bandwidth).
+
+* Principles: Precompute where possible, stream small JSON to clients, keep YouTube in-page (no downloads), Gemini for question generation.
+
+2) High-level architecture (GCP)
+   * Frontend: Next.js (React + TS) on Firebase Hosting + Cloud CDN. Uses YouTube IFrame Player API for tight control (pause/seek/events).
+
+   * Auth & tenancy: Firebase Auth (email/password + Google SSO). Multi-tenant via orgId on all records; Firestore rules enforce org scoping.
+
+   * APIs / backend:
+
+      * Cloud Run (Node/Express or Python/FastAPI) for REST/GraphQL (stateless, autoscale).
+
+      * Cloud Functions (2nd gen) for light webhooks & scheduled jobs.
+
+      * Cloud Tasks + Pub/Sub for async pipelines (captions fetch, segmentation, Gemini generation).
+
+         * Data:
+
+            * Firestore (OLTP) for orgs/classes/users/playlists/videos/segments/questions/attempts/progress.
+
+            * BigQuery (analytics) via Dataflow or scheduled export for cohort/usage analytics.
+
+            * Cloud Storage for exports (CSV, PDFs) and any teacher-uploaded SRT files.
+
+               * AI: Gemini 1.5 Pro (Google AI Studio / Vertex AI) for:
+
+                  * Segment summaries (90s chunks)
+
+                  * MCAQ generation + distractors + rationales
+
+                  * Difficulty calibration
+
+                  * Hallucination guardrails (answer must be quote-supported by transcript chunk)
+
+                     * External APIs:
+
+                        * YouTube Data API v3 (playlists, videos, metadata, chapters)
+
+                        * YouTube IFrame Player API (client-side control + events)
+
+                        * YouTube Captions API (only when teacher authorizes channel; otherwise see “Captions strategy” below)
+
+3) Key workflows
+3.1 Teacher: assign playlist
+                           1. Teacher pastes YouTube playlist URL → Backend calls playlistItems.list to fetch video ids + metadata.
+
+                           2. For each video: enqueue Preprocessing Task:
+
+                              * Try to fetch captions:
+
+                                 * If the teacher is the channel owner and authorizes OAuth → use Captions API to download SRT/VTT.
+
+                                 * If not available, show a prompt to upload SRT or toggle “Chapters-only mode” (see #Captions Strategy).
+
+                                    * Segmenter creates ~60–120s checkpoints:
+
+                                       * Prefer YouTube chapters boundaries; else sentence/semantic segmentation of transcript text at ~120s average.
+
+                                          * For each segment: call Gemini with transcript chunk to generate:
+
+                                             * 1–3 MCQs (4 options, one correct, brief rationale)
+
+                                             * Tags (topic, difficulty: E/M/H)
+
+                                                * Store documents in Firestore: videos/{videoId}/segments/{segmentId} and nested questions.
+
+                                                   3. Teacher sets assignment window, mastery rules (e.g., “>=70% quiz correct to mark segment as complete”), optional anti-skip options (see 3.3).
+
+3.2 Student: watch & quiz
+                                                      * Player loads via IFrame API.
+
+                                                      * The client receives segment checkpoints (timestamps) and pre-generated quiz items.
+
+                                                      * On reaching a checkpoint, frontend pauses → displays MCQ overlay → records answer → shows immediate feedback (optional).
+
+                                                      * Resume only after answering (or after timeout, per teacher policy).
+
+                                                      * All events (start, pause, segment-complete, answer, seek, tab-blur) are batched and sent to backend for progress logging.
+
+3.3 Anti-skip & integrity
+                                                         * Watch-time threshold: require X% of preceding segment watched continuously before quiz unlock.
+
+                                                         * Seek suppression: disable seek forward beyond current checkpoint (or snap back).
+
+                                                         * Random attention checks: short one-tap “I’m here” prompt (no score).
+
+                                                         * Unique quiz variations: shuffle options; pick 1 of N pre-generated items per student.
+
+                                                         * Device binding (optional): per session token; suspicious patterns flagged to teacher dashboard.
+
+3.4 Progress & analytics
+                                                            * Firestore documents:
+
+                                                               * attempts (per student per question)
+
+                                                               * progress (per student per video/playlist: watch %, score, attempts, last activity)
+
+                                                                  * Nightly export to BigQuery for: heatmaps, item difficulty, discrimination index, class mastery, time-on-task.
+
+4) Data model (Firestore — simplified)
+/orgs/{orgId}
+/users/{userId} { role: 'teacher'|'student', orgId }
+/classes/{classId} { orgId, name, teacherIds[] }
+/playlists/{playlistId} { orgId, title, youtubePlaylistId, classIds[], policy{...} }
+/videos/{videoId} {
+  orgId, youtubeVideoId, title, duration, hasCaptions, segmentation:{...}
+}
+/videos/{videoId}/segments/{segmentId} {
+  tStartSec, tEndSec, textChunkHash, summary, difficulty
+}
+/videos/{videoId}/segments/{segmentId}/questions/{questionId} {
+  stem, options[4], correctIndex, rationale, tags[], difficulty
+}
+/assignments/{assignmentId} {
+  orgId, playlistId, classId, startAt, endAt, rules{watchPct, minScore}
+}
+/progress/{progressId} {
+  userId, assignmentId, videoId, segmentId, watchPct, score, events[]
+}
+/attempts/{attemptId} {
+  userId, questionId, chosenIndex, isCorrect, latencyMs, ts
+}
+
+
+5) Captions strategy (robust & compliant)
+                                                                     * Preferred: Teacher owns content → OAuth → YouTube Captions API.
+
+                                                                     * Fallbacks:
+
+                                                                        1. Teacher uploads SRT/VTT (from the video owner).
+
+                                                                        2. Chapters-only mode: if no transcript, we still create checkpoints using YouTube chapters & Gemini “questions from title+description+chapter title” (less precise but usable).
+
+                                                                           * Optional for teacher-created content: Host original videos on Drive/Cloud Storage and run Speech-to-Text to generate transcript (non-YouTube path).
+
+6) AI prompts & safety (Gemini)
+                                                                              * Inputs: transcript chunk (≤ ~120s of text), video title, chapter name, grade band, locale (Urdu/English), difficulty target.
+
+                                                                              * Output JSON schema: { stem, options[4], correctIndex, rationale, tags[], difficulty }
+
+                                                                              * Grounding: Ask Gemini to quote the sentence/lines that justify correct answer (stored internally for audit).
+
+                                                                              * Safety: Disallow personal data; neutral tone; child-safe; ban controversial topics unless educational & teacher-approved.
+
+                                                                              * Caching: Deduplicate by textChunkHash to avoid re-billing.
+
+7) Frontend UX (students & teachers)
+Student Player
+                                                                                 * Minimal chrome: progress bar with checkpoint dots; time disabled/semi-hidden.
+
+                                                                                 * Quiz modal: big tap targets, keyboard shortcuts (1–4), quick feedback.
+
+                                                                                 * Low-bandwidth mode: default to 360p; warn on network loss; persist answers locally (IndexedDB) with retry sync.
+
+Teacher Console
+                                                                                    * Assign: paste playlist → preview segments → toggle “Chapters-only” or upload SRT → set rules → publish.
+
+                                                                                    * Dashboard: class heatmap (segments × students), watch % vs score, integrity flags.
+
+                                                                                    * Item analysis: question difficulty, distractor popularity, rewrite/approve button (edits saved as v2).
+
+8) DevOps, performance & cost
+                                                                                       * Autoscale on Cloud Run; cold starts mitigated via min instances=1 per region.
+
+                                                                                       * Cloud CDN caches static, and signed URLs for JSON segment manifests.
+
+                                                                                       * Firestore composite indexes for common queries (by orgId/classId/assignmentId).
+
+                                                                                       * Cloud Scheduler to pre-process new playlists overnight; Cloud Tasks rate-limit Gemini calls.
+
+                                                                                       * Observability: Cloud Logging, Error Reporting, Cloud Trace; custom “question-gen failure” alerts.
+
+                                                                                       * Cost control: batch Gemini calls, reuse cached questions, limit max items per segment by plan tier.
+
+9) Security & privacy
+                                                                                          * AuthZ: Firebase Auth + custom claims (teacher/admin/student).
+
+                                                                                          * Rules: Firestore security rules by orgId. Separate service account for AI & YouTube APIs.
+
+                                                                                          * PII: Store minimal student data; optional pseudonymous IDs.
+
+                                                                                          * Compliance: No YouTube downloading; we only embed; transcripts processed only if properly authorized or supplied.
+
+________________
+
+
+Landing page — “iLearn by ER21”
+Visual style
+Clean, modern, fast; plenty of white space; dark-blue primary; friendly accent. Subtle motion on scroll. CTA persistent.
+Sections (copy you can use)
+                                                                                             1. Hero
+
+                                                                                                * Headline: Turn YouTube Playlists into Measurable Learning
+
+                                                                                                * Sub: Auto-pause, AI quizzes, real-time progress — built for Grades 1–8.
+
+                                                                                                * CTA: Start free | Watch 60-sec demo
+
+                                                                                                   2. How it works (3 steps)
+
+                                                                                                      * Paste a playlist
+
+                                                                                                      * iLearn auto-adds checkpoints & questions
+
+                                                                                                      * Students watch, answer, and master
+
+                                                                                                         3. Why teachers love it
+
+                                                                                                            * Intelligent pauses at concept boundaries
+
+                                                                                                            * AI-generated MCAQs you can edit
+
+                                                                                                            * Anti-skip controls (no more fake “completed”)
+
+                                                                                                            * Class heatmaps & mastery tracking
+
+                                                                                                               4. Built on Google
+
+                                                                                                                  * Uses YouTube Player & Data APIs, Gemini question generation, Firebase security.
+
+                                                                                                                     5. For every classroom
+
+                                                                                                                        * Low-bandwidth mode, Urdu/English UI, offline answer sync.
+
+                                                                                                                           6. Pricing (beta)
+
+                                                                                                                              * Free for early schools. Premium analytics & parental reports coming soon.
+
+                                                                                                                                 7. Social proof / logos (schools, districts, testimonials)
+
+                                                                                                                                 8. FAQ (privacy, ownership, does it download videos? → no)
+
+                                                                                                                                 9. Footer (ER21, contact, terms, privacy)
+
+________________
+
+
+Build plan — Services & endpoints
+Backend (Cloud Run, Node/Express)
+                                                                                                                                    * POST /api/playlists/ingest { url, orgId } → returns playlistId
+
+                                                                                                                                    * GET /api/playlists/:id → videos, status
+
+                                                                                                                                    * POST /api/videos/:id/prepare → (re)trigger preprocessing
+
+                                                                                                                                    * GET /api/videos/:id/manifest → segment checkpoints + question IDs (signed)
+
+                                                                                                                                    * POST /api/attempts { questionId, choice, latency } → writes attempt + updates progress
+
+                                                                                                                                    * GET /api/assignments/:id/progress → class dashboard
+
+                                                                                                                                    * POST /api/captions/upload (SRT) → attach to video
+
+                                                                                                                                    * POST /api/youtube/oauth/callback → store channel tokens (teacher-owned)
+
+Cloud Functions (2nd gen)
+                                                                                                                                       * onPlaylistIngested → enqueue prepareVideo tasks
+
+                                                                                                                                       * prepareVideo(videoId) pipeline:
+
+                                                                                                                                          1. Fetch captions (authorized) or accept SRT; else mark chaptersOnly=true
+
+                                                                                                                                          2. Segment transcript (or chapters) → chunks
+
+                                                                                                                                          3. For each chunk: call Gemini → store questions
+
+                                                                                                                                          4. Publish videoPrepared
+
+                                                                                                                                             * Schedulers: nightly re-tries, export to BigQuery
+
+________________
+one-shot prompt
+
+
+STACK
+- Frontend: Next.js 14 (App Router), React, TypeScript, Tailwind. Host on Firebase Hosting.
+- Auth: Firebase Auth (email/password + Google SSO). Roles: admin, teacher, student.
+- Backend: Cloud Run (Node + Express). Provide a Dockerfile and Cloud Build config.
+- Data: Firestore (collections as below). Security rules scoped by orgId and role.
+- AI: Google AI Studio (Gemini 1.5 Pro) for MCQ generation from transcript chunks.
+- YouTube: YouTube Data API v3 + IFrame Player API. OAuth flow for teachers to grant captions access.
+
+
+REQUIREMENTS
+1) Teacher pastes a YouTube playlist URL.
+   - Backend hits `playlistItems.list` to store videoIds + titles.
+   - For each video, call a `prepareVideo(videoId)` endpoint that:
+     a) Attempts to fetch captions via YouTube Captions API if teacher authorized.
+     b) If no captions, accept an uploaded SRT/VTT OR mark `chaptersOnly=true`.
+     c) Segments transcript (or chapters) into ~60–120s chunks.
+     d) Calls Gemini with the transcript chunk to produce 1–3 MCQs in JSON:
+        { stem, options[4], correctIndex, rationale, tags[], difficulty }
+     e) Writes to Firestore under `/videos/{videoId}/segments/{segmentId}/questions/{questionId}`.
+
+
+2) Student player page:
+   - Embed YouTube via IFrame API; load segment manifest from `/api/videos/:id/manifest`.
+   - Auto-pause at each checkpoint; show quiz modal.
+   - Record answers via `POST /api/attempts`, update `/progress` docs.
+
+
+3) Teacher dashboard:
+   - Class heatmap: students × segments, watch% and quiz scores.
+   - Controls: anti-skip (require watch %), attempt limits, due dates.
+
+
+4) Firestore schema (create types and zod validators):
+   /orgs, /users, /classes, /playlists, /videos, /videos/{videoId}/segments, /.../questions, /assignments, /attempts, /progress
+
+
+5) Security:
+   - Firestore rules limiting access by orgId and role.
+   - Signed endpoints for manifests.
+   - Never download YouTube video data; only use embeds and authorized captions.
+
+
+6) Provide:
+   - Express routes: /api/playlists/ingest, /api/videos/:id/prepare, /api/videos/:id/manifest, /api/attempts
+   - Gemini client util: `generateMcqs(transcriptChunk, gradeBand, locale)` with safety settings and deterministic temperature.
+   - Segmentation util that takes SRT text -> array of { tStartSec, tEndSec, text } ~90sec average.
+   - Simple landing page "iLearn by ER21" with hero, features, how-it-works, and CTA.
+
+
+7) Include:
+   - Dockerfile for Cloud Run.
+   - firebase.json + hosting config (rewrites to Next.js).
+   - .env.sample with YOUTUBE_API_KEY, GOOGLE_CLIENT_ID/SECRET, FIREBASE config, AI_STUDIO_API_KEY.
+   - Basic unit tests for MCQ schema and segmentation.
+
+
+Return: file tree, key code files, and clear setup steps (gcloud deploy, firebase deploy).
+
+
+________________

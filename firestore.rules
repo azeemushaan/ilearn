@@ -9,14 +9,14 @@ service cloud.firestore {
     match /coaches/{coachId} {
       allow get: if isCoachOwner(coachId);
       allow list: if false;
-      allow create: if isCoachOwner(coachId) && isRequestCoach(coachId);
-      allow update, delete: if isCoachOwner(coachId) && isRequestCoach(coachId);
+      allow create: if request.auth != null;
+      allow update, delete: if isCoachOwner(coachId);
     }
 
     match /users/{userId} {
       allow get: if isSelf(userId) || (isCoachScoped(resource.data.coachId) && isCoachMember(resource.data.coachId));
-      allow list: if false;
-      allow create: if isSelf(userId) && isRequestCoach(request.resource.data.coachId);
+      allow list: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == userId;
       allow update: if isSelf(userId) || (isCoachMember(resource.data.coachId) && isRequestCoach(resource.data.coachId));
       allow delete: if isSelf(userId);
     }
@@ -27,17 +27,81 @@ service cloud.firestore {
     }
 
     match /subscriptions/{subId} {
-      allow get: if isCoachScoped(resource.data.coachId) && isCoachMember(resource.data.coachId);
-      allow list: if false;
-      allow create: if isCoachScoped(request.resource.data.coachId) && isCoachMember(request.resource.data.coachId);
-      allow update, delete: if isCoachScoped(resource.data.coachId) && isCoachMember(resource.data.coachId);
+      allow get: if request.auth != null && (isCoachScoped(resource.data.coachId) && isCoachMember(resource.data.coachId));
+      allow list: if request.auth != null;
+      allow create: if request.auth != null && isCoachScoped(request.resource.data.coachId) && isCoachMember(request.resource.data.coachId);
+      allow update, delete: if request.auth != null && isCoachScoped(resource.data.coachId) && isCoachMember(resource.data.coachId);
     }
 
     match /payments/{paymentId} {
-      allow get: if isCoachScoped(resource.data.coachId) && isCoachMember(resource.data.coachId);
-      allow list: if false;
-      allow create: if isCoachScoped(request.resource.data.coachId) && isCoachMember(request.resource.data.coachId);
+      allow get: if request.auth != null && isCoachScoped(resource.data.coachId) && isCoachMember(resource.data.coachId);
+      allow list: if request.auth != null;
+      allow create: if request.auth != null && isCoachScoped(request.resource.data.coachId) && isCoachMember(request.resource.data.coachId);
       allow update, delete: if false;
+    }
+
+    // LMS Collections
+    match /playlists/{playlistId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.coachId == request.auth.token.coachId;
+      allow update, delete: if request.auth != null && resource.data.coachId == request.auth.token.coachId;
+    }
+
+    match /videos/{videoId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only backend can write
+
+      match /segments/{segmentId} {
+        allow read: if request.auth != null;
+        allow write: if false;
+
+        match /questions/{questionId} {
+          allow read: if request.auth != null;
+          allow write: if false;
+        }
+      }
+    }
+
+    match /assignments/{assignmentId} {
+      allow read: if request.auth != null && (
+        resource.data.coachId == request.auth.token.coachId ||
+        request.auth.uid in resource.data.studentIds
+      );
+      allow create, update: if request.auth != null && request.resource.data.coachId == request.auth.token.coachId;
+      allow delete: if request.auth != null && resource.data.coachId == request.auth.token.coachId;
+    }
+
+    match /attempts/{attemptId} {
+      allow read: if request.auth != null && (
+        resource.data.studentId == request.auth.uid ||
+        request.auth.token.role == 'coach'
+      );
+      allow create: if request.auth != null && request.resource.data.studentId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /progress/{progressId} {
+      allow read: if request.auth != null && (
+        resource.data.studentId == request.auth.uid ||
+        request.auth.token.role == 'coach'
+      );
+      allow create, update: if request.auth != null && request.resource.data.studentId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /invitations/{invitationId} {
+      // Allow anyone to read invitations by invite code (for signup flow)
+      allow get: if true;
+      // Allow queries by inviteCode and email for unauthenticated signup
+      allow list: if request.auth != null || 
+                     (request.query.limit <= 1 && 
+                      ('inviteCode' in request.query.filters || 'email' in request.query.filters));
+      allow create: if request.auth != null && request.resource.data.coachId == request.auth.token.coachId;
+      allow update: if request.auth != null && (
+        resource.data.coachId == request.auth.token.coachId ||
+        resource.data.email == request.auth.token.email
+      );
+      allow delete: if request.auth != null && resource.data.coachId == request.auth.token.coachId;
     }
 
     match /invoices/{invoiceId} {

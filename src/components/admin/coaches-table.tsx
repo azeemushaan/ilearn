@@ -7,10 +7,21 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { disableCoachAction, enableCoachAction } from '@/app/admin/(dashboard)/coaches/actions';
+import { disableCoachAction, enableCoachAction, deleteCoachAction } from '@/app/admin/dashboard/coaches/actions';
 import { useImpersonation } from '@/hooks/use-impersonation';
 import { toast } from '@/hooks/use-toast';
 import { CreateInvoiceDialog } from '@/components/admin/create-invoice-dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 export type CoachesTableProps = {
   coaches: Coach[];
@@ -28,11 +39,17 @@ export function CoachesTable({ coaches, subscriptions, invoices, payments }: Coa
     const activeSubscription = subscriptions.find((subscription) => subscription.coachId === coach.id && subscription.status === 'active');
     return {
       ...coach,
-      planTier: activeSubscription?.tier ?? coach.plan.tier,
-      seatLimit: activeSubscription?.seatLimit ?? coach.plan.seats,
+      planTier: 'N/A',
+      seatLimit: activeSubscription?.maxStudents ?? 0,
       status: activeSubscription?.status ?? 'inactive',
     };
   }), [coaches, subscriptions]);
+
+  useEffect(() => {
+    if (!selectedCoachId && coachRows.length) {
+      setSelectedCoachId(coachRows[0].id);
+    }
+  }, [coachRows, selectedCoachId]);
 
   const columns: ColumnDef<(typeof coachRows)[number]>[] = [
     {
@@ -86,7 +103,7 @@ export function CoachesTable({ coaches, subscriptions, invoices, payments }: Coa
             <header className="space-y-1">
               <h2 className="text-xl font-semibold">{selectedCoach.displayName}</h2>
               <p className="text-sm text-muted-foreground">{selectedCoach.email}</p>
-              <p className="text-xs text-muted-foreground">Plan tier: {selectedCoach.plan.tier}</p>
+              <p className="text-xs text-muted-foreground">Coach ID: {selectedCoach.id}</p>
             </header>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -123,6 +140,69 @@ export function CoachesTable({ coaches, subscriptions, invoices, payments }: Coa
                 Enable coach
               </Button>
               <CreateInvoiceDialog coachId={selectedCoach.id} />
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button size="sm" variant="destructive" disabled={pending}>
+                    Delete Coach
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription className="space-y-2">
+                      <p className="font-semibold text-destructive">
+                        This action cannot be undone. This will permanently delete:
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 text-sm">
+                        <li>Coach account: {selectedCoach.displayName}</li>
+                        <li>All associated students and their Firebase Auth accounts</li>
+                        <li>All subscriptions and billing records</li>
+                        <li>All playlists, videos, and assignments</li>
+                        <li>All student progress and quiz attempts</li>
+                        <li>All uploaded files (bank slips, etc.)</li>
+                      </ul>
+                      <p className="text-sm mt-2">
+                        Type <span className="font-mono font-bold">DELETE</span> to confirm.
+                      </p>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={(e) => {
+                        e.preventDefault();
+                        const input = prompt(`Type DELETE to confirm deletion of ${selectedCoach.displayName}`);
+                        if (input === 'DELETE') {
+                          startTransition(async () => {
+                            try {
+                              await deleteCoachAction(selectedCoach.id);
+                              toast({ 
+                                title: 'Coach Deleted',
+                                description: `${selectedCoach.displayName} and all associated data have been permanently deleted.`,
+                              });
+                              setSelectedCoachId(null);
+                            } catch (error: any) {
+                              toast({ 
+                                title: 'Deletion Failed',
+                                description: error.message || 'Failed to delete coach. Please try again.',
+                                variant: 'destructive'
+                              });
+                            }
+                          });
+                        } else {
+                          toast({ 
+                            title: 'Deletion Cancelled',
+                            description: 'Coach was not deleted.',
+                          });
+                        }
+                      }}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Delete Forever
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
             <section className="space-y-2">
               <h3 className="text-sm font-semibold uppercase">Subscriptions</h3>
@@ -130,10 +210,10 @@ export function CoachesTable({ coaches, subscriptions, invoices, payments }: Coa
                 {coachSubscriptions.map((subscription) => (
                   <div key={subscription.id} className="rounded border px-3 py-2">
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{subscription.tier}</span>
+                      <span>Subscription</span>
                       <span>{subscription.status}</span>
                     </div>
-                    <div className="text-sm">Seat limit: {subscription.seatLimit}</div>
+                    <div className="text-sm">Students: {subscription.maxStudents}</div>
                     <div className="text-xs text-muted-foreground">Renewal: {formatDate(subscription.currentPeriodEnd)}</div>
                   </div>
                 ))}
@@ -178,9 +258,4 @@ export function CoachesTable({ coaches, subscriptions, invoices, payments }: Coa
     </div>
   );
 }
-  useEffect(() => {
-    if (!selectedCoachId && coachRows.length) {
-      setSelectedCoachId(coachRows[0].id);
-    }
-  }, [coachRows, selectedCoachId]);
 

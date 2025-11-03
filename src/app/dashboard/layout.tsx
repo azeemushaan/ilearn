@@ -19,11 +19,12 @@ import {
   HelpCircle,
   LogOut,
   CreditCard,
+  Video,
 } from "lucide-react";
 import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase } from "@/firebase";
+import { useAuth, useUser, useFirestore, useDoc, useMemoFirebase, useFirebaseAuth } from "@/firebase";
 import { doc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -35,10 +36,12 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const auth = useAuth();
-  const { user, isLoading: isUserLoading } = useUser();
+  const { user } = useUser();
+  const { claims } = useFirebaseAuth();
   const router = useRouter();
   const firestore = useFirestore();
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
   const userDocRef = useMemoFirebase(() => {
     if (!firestore || !user) return null;
@@ -48,23 +51,37 @@ export default function DashboardLayout({
   const { data: userData, isLoading: isUserDataLoading } = useDoc(userDocRef);
 
   useEffect(() => {
-    if (!isUserLoading && !user) {
-      router.push("/login");
+    if (user) {
+      setIsCheckingAuth(false);
+    } else {
+      const timer = setTimeout(() => {
+        if (!user) {
+          console.log('[Dashboard Layout] No user found after timeout, redirecting to login');
+          router.push("/login");
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
     }
+  }, [user, router]);
+
+  useEffect(() => {
     if (userData) {
       setUserRole((userData as any).role);
     }
-  }, [user, isUserLoading, router, userData]);
+  }, [userData]);
 
   const handleLogout = async () => {
     if (auth) {
       await auth.signOut();
     }
-    // Force a reload to clear any cached session data
     window.location.href = '/login';
   };
 
-  if (isUserLoading || isUserDataLoading) {
+  if (isCheckingAuth || !user) {
+    return <div className="flex h-screen w-full items-center justify-center">Loading...</div>;
+  }
+
+  if (isUserDataLoading) {
     return <div className="flex h-screen w-full items-center justify-center">Loading...</div>;
   }
 
@@ -87,38 +104,58 @@ export default function DashboardLayout({
                   </Link>
                 </SidebarMenuButton>
             </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/playlists">
-                  <PlaySquare />
-                  <span>Playlists</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/classes">
-                  <Users />
-                  <span>Classes</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/subscription">
-                  <CreditCard />
-                  <span>Subscription</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href="/dashboard/analytics">
-                  <BarChart3 />
-                  <span>Analytics</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            
+            {/* Coach-only menu items */}
+            {claims?.role === 'coach' && (
+              <>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href="/dashboard/playlists">
+                      <PlaySquare />
+                      <span>Playlists</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href="/dashboard/manage-students">
+                      <Users />
+                      <span>Students</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href="/dashboard/analytics">
+                      <BarChart3 />
+                      <span>Analytics</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href="/dashboard/subscription">
+                      <CreditCard />
+                      <span>Subscription</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </>
+            )}
+
+            {/* Student-only menu items */}
+            {claims?.role === 'student' && (
+              <>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href="/dashboard/my-assignments">
+                      <Video />
+                      <span>My Assignments</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </>
+            )}
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter>

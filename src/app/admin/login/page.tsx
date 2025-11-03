@@ -28,11 +28,27 @@ export default function AdminLoginPage() {
     const password = formData.get('password') as string;
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      // Get ID token
+      const idToken = await userCredential.user.getIdToken(true);
+      
+      // Create session cookie
+      const response: Response = await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to create session');
+      }
+      
       // Force a refresh of the ID token to get the latest custom claims
       await refreshClaims();
-      // Redirect to the dashboard; the layout will handle verification
-      router.replace('/admin/dashboard');
+      
+      // Redirect to the dashboard
+      window.location.href = '/admin/dashboard';
     } catch (err: any) {
       setError(err.message || 'An unknown error occurred.');
       setSubmitting(false);
