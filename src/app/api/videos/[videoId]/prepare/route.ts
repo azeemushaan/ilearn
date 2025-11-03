@@ -13,13 +13,14 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { videoId: string } }
 ) {
+  const { videoId } = params;
+
   try {
-    const { videoId } = params;
     const body = await request.json();
-    const { 
-      captionContent, 
-      captionFormat = 'srt', 
-      forceReprocess = false 
+    const {
+      captionContent,
+      captionFormat = 'srt',
+      forceReprocess = false
     } = body;
 
     const db = adminFirestore();
@@ -42,12 +43,14 @@ export async function POST(
         message: 'Video already processed',
         videoId,
         status: 'ready',
+        errorMessage: videoData.errorMessage ?? null,
       });
     }
 
     // Update status to processing
     await videoRef.update({
       status: 'processing',
+      errorMessage: null,
       updatedAt: Timestamp.now(),
     });
 
@@ -90,37 +93,40 @@ export async function POST(
 
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        
-        // Create segment document
-        const segmentRef = await db.collection(`videos/${videoId}/segments`).add({
+        const difficulty = i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard';
+
+        // Generate MCQs for this segment. Any failure should abort processing.
+        const mcqResult = await generateMcq({
+          transcriptChunk: segment.textChunk,
+          videoTitle: videoData.title,
+          chapterName: `Segment ${i + 1}`,
+          gradeBand: '1-8', // Default for now
+          locale: 'en',
+          difficultyTarget: difficulty,
+        });
+
+        const questions = mcqResult.questions ?? [];
+
+        // Create segment document only after MCQs are generated successfully
+        const segmentRef = db.collection(`videos/${videoId}/segments`).doc();
+        await segmentRef.set({
           videoId,
           tStartSec: segment.tStartSec,
           tEndSec: segment.tEndSec,
           textChunk: segment.textChunk,
           textChunkHash: segment.textChunkHash,
           summary: segment.textChunk.substring(0, 100) + '...',
-          difficulty: i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard',
-          questionCount: 0,
+          difficulty,
+          questionCount: questions.length,
           createdAt: Timestamp.now(),
         });
 
         segmentRefs.push(segmentRef.id);
 
-        // Generate MCQs for this segment
-        try {
-          const mcqResult = await generateMcq({
-            transcriptChunk: segment.textChunk,
-            videoTitle: videoData.title,
-            chapterName: `Segment ${i + 1}`,
-            gradeBand: '1-8', // Default for now
-            locale: 'en',
-            difficultyTarget: i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard',
-          });
-
-          // Store questions
-          let questionCount = 0;
-          for (const question of mcqResult.questions) {
-            await db.collection(`videos/${videoId}/segments/${segmentRef.id}/questions`).add({
+        if (questions.length > 0) {
+          const questionCollection = db.collection(`videos/${videoId}/segments/${segmentRef.id}/questions`);
+          const questionWrites = questions.map((question) =>
+            questionCollection.add({
               segmentId: segmentRef.id,
               videoId,
               stem: question.stem,
@@ -130,17 +136,9 @@ export async function POST(
               tags: question.tags,
               difficulty: question.difficulty,
               createdAt: Timestamp.now(),
-            });
-            questionCount++;
-          }
-
-          // Update segment question count
-          await segmentRef.update({
-            questionCount,
-          });
-        } catch (mcqError) {
-          console.error(`Error generating MCQs for segment ${i}:`, mcqError);
-          // Continue with other segments even if one fails
+            })
+          );
+          await Promise.all(questionWrites);
         }
       }
 
@@ -148,6 +146,7 @@ export async function POST(
       await videoRef.update({
         status: 'ready',
         segmentCount: segments.length,
+        errorMessage: null,
         updatedAt: Timestamp.now(),
       });
 
@@ -158,11 +157,14 @@ export async function POST(
         segmentsCreated: segments.length,
         segmentRefs,
         status: 'ready',
+        errorMessage: null,
       });
     } catch (error: any) {
       // Update video status to error
+      const errorMessage = error?.message || 'Failed to prepare video';
       await videoRef.update({
         status: 'error',
+        errorMessage,
         updatedAt: Timestamp.now(),
       });
 
@@ -171,7 +173,12 @@ export async function POST(
   } catch (error: any) {
     console.error('Error preparing video:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to prepare video' },
+      {
+        success: false,
+        error: error.message || 'Failed to prepare video',
+        status: 'error',
+        videoId,
+      },
       { status: 500 }
     );
   }
