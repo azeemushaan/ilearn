@@ -34,6 +34,14 @@ export async function POST(
     }
 
     const videoData = videoDoc.data()!;
+    const coachId: string | undefined = videoData.coachId;
+
+    if (!coachId) {
+      return NextResponse.json(
+        { error: 'Video is missing associated coach information' },
+        { status: 400 }
+      );
+    }
 
     // Check if already processed
     if (videoData.status === 'ready' && !forceReprocess) {
@@ -52,6 +60,19 @@ export async function POST(
     });
 
     try {
+      const segmentsCollection = db.collection(`videos/${videoId}/segments`);
+      const existingSegments = await segmentsCollection.get();
+
+      if (!existingSegments.empty) {
+        for (const segmentDoc of existingSegments.docs) {
+          const questionsSnap = await segmentDoc.ref.collection('questions').get();
+          for (const questionDoc of questionsSnap.docs) {
+            await questionDoc.ref.delete();
+          }
+          await segmentDoc.ref.delete();
+        }
+      }
+
       let segments;
 
       // Strategy 1: Use provided captions
@@ -93,6 +114,7 @@ export async function POST(
         
         // Create segment document
         const segmentRef = await db.collection(`videos/${videoId}/segments`).add({
+          coachId,
           videoId,
           tStartSec: segment.tStartSec,
           tEndSec: segment.tEndSec,
@@ -123,6 +145,7 @@ export async function POST(
             await db.collection(`videos/${videoId}/segments/${segmentRef.id}/questions`).add({
               segmentId: segmentRef.id,
               videoId,
+              coachId,
               stem: question.stem,
               options: question.options,
               correctIndex: question.correctIndex,

@@ -188,6 +188,7 @@ export const videoSchema = z.object({
 export type Video = z.infer<typeof videoSchema> & { id: string };
 
 export const segmentSchema = z.object({
+  coachId: z.string().min(1),
   videoId: z.string().min(1),
   tStartSec: z.number().min(0),
   tEndSec: z.number().min(0),
@@ -202,6 +203,7 @@ export const segmentSchema = z.object({
 export type Segment = z.infer<typeof segmentSchema> & { id: string };
 
 export const questionSchema = z.object({
+  coachId: z.string().min(1),
   segmentId: z.string().min(1),
   videoId: z.string().min(1),
   stem: z.string().min(1),
