@@ -7,7 +7,12 @@ import {
   segmentTranscript, 
   createUniformSegments 
 } from '@/lib/youtube/segmentation';
-import { generateMcq } from '@/ai/flows/generate-mcq';
+import { generateMcq, McqGenerationError } from '@/ai/flows/generate-mcq';
+
+const toLoggableError = (error: unknown) =>
+  error instanceof Error
+    ? { name: error.name, message: error.message, stack: error.stack }
+    : { message: String(error) };
 
 export async function POST(
   request: NextRequest,
@@ -107,41 +112,36 @@ export async function POST(
         segmentRefs.push(segmentRef.id);
 
         // Generate MCQs for this segment
-        try {
-          const mcqResult = await generateMcq({
-            transcriptChunk: segment.textChunk,
-            videoTitle: videoData.title,
-            chapterName: `Segment ${i + 1}`,
-            gradeBand: '1-8', // Default for now
-            locale: 'en',
-            difficultyTarget: i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard',
-          });
+        const mcqResult = await generateMcq({
+          transcriptChunk: segment.textChunk,
+          videoTitle: videoData.title,
+          chapterName: `Segment ${i + 1}`,
+          gradeBand: '1-8', // Default for now
+          locale: 'en',
+          difficultyTarget: i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard',
+        });
 
-          // Store questions
-          let questionCount = 0;
-          for (const question of mcqResult.questions) {
-            await db.collection(`videos/${videoId}/segments/${segmentRef.id}/questions`).add({
-              segmentId: segmentRef.id,
-              videoId,
-              stem: question.stem,
-              options: question.options,
-              correctIndex: question.correctIndex,
-              rationale: question.rationale,
-              tags: question.tags,
-              difficulty: question.difficulty,
-              createdAt: Timestamp.now(),
-            });
-            questionCount++;
-          }
-
-          // Update segment question count
-          await segmentRef.update({
-            questionCount,
+        // Store questions
+        let questionCount = 0;
+        for (const question of mcqResult.questions) {
+          await db.collection(`videos/${videoId}/segments/${segmentRef.id}/questions`).add({
+            segmentId: segmentRef.id,
+            videoId,
+            stem: question.stem,
+            options: question.options,
+            correctIndex: question.correctIndex,
+            rationale: question.rationale,
+            tags: question.tags,
+            difficulty: question.difficulty,
+            createdAt: Timestamp.now(),
           });
-        } catch (mcqError) {
-          console.error(`Error generating MCQs for segment ${i}:`, mcqError);
-          // Continue with other segments even if one fails
+          questionCount++;
         }
+
+        // Update segment question count
+        await segmentRef.update({
+          questionCount,
+        });
       }
 
       // Update video status to ready
@@ -166,13 +166,24 @@ export async function POST(
         updatedAt: Timestamp.now(),
       });
 
+      console.error('prepareVideo.processFailure', {
+        videoId,
+        error: toLoggableError(error),
+      });
+
       throw error;
     }
   } catch (error: any) {
-    console.error('Error preparing video:', error);
+    const status = error instanceof McqGenerationError ? 502 : 500;
+
+    console.error('prepareVideoRoute.error', {
+      videoId: params.videoId,
+      error: toLoggableError(error),
+      status,
+    });
     return NextResponse.json(
       { error: error.message || 'Failed to prepare video' },
-      { status: 500 }
+      { status }
     );
   }
 }
