@@ -286,7 +286,16 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
                 <AlertDescription>
                   This video is still being processed. Quizzes will be available soon.
                   {(video as any).status === 'processing' && ' Please check back in a few minutes.'}
-                  {(video as any).status === 'error' && ' There was an error processing this video. Please contact your instructor.'}
+                  {(video as any).status === 'error' && (
+                    <span className="mt-2 block">
+                      There was an error processing this video. Please contact your instructor.
+                      {(video as any).errorMessage && (
+                        <span className="mt-1 block text-sm text-destructive">
+                          Error details: {(video as any).errorMessage}
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </AlertDescription>
               </Alert>
               {(video as any).status === 'processing' && (

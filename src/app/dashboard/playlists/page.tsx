@@ -75,13 +75,41 @@ export default function PlaylistsPage() {
 
           // Trigger video preprocessing for all videos
           if (result.videoRefs && result.videoRefs.length > 0) {
-            // Process videos in background
-            for (const videoRef of result.videoRefs) {
-              fetch(`/api/videos/${videoRef}/prepare`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ forceReprocess: false }),
-              }).catch(err => console.error('Error processing video:', err));
+            const preparationResults = await Promise.allSettled(
+              result.videoRefs.map(async (videoRef: string) => {
+                const preparationResponse = await fetch(`/api/videos/${videoRef}/prepare`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ forceReprocess: false }),
+                });
+
+                const payload = await preparationResponse.clone().json().catch(() => null);
+
+                if (!preparationResponse.ok) {
+                  const message = payload?.error || payload?.errorMessage || payload?.message || 'Failed to prepare video';
+                  const error = new Error(`[${videoRef}] ${message}`);
+                  console.error('Error processing video:', error);
+                  throw error;
+                }
+
+                return payload;
+              })
+            );
+
+            const failureMessages = preparationResults.reduce<string[]>((messages, result) => {
+              if (result.status === 'rejected') {
+                const reason = result.reason;
+                messages.push(reason instanceof Error ? reason.message : String(reason));
+              }
+              return messages;
+            }, []);
+
+            if (failureMessages.length > 0) {
+              toast({
+                title: 'Video processing failed',
+                description: failureMessages.join('\n'),
+                variant: 'destructive',
+              });
             }
           }
         } else {

@@ -282,7 +282,13 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
                                 {video.status === 'processing' ? 'Processing...' : video.status}
                               </Badge>
                             )}
-                            
+
+                            {video.status === 'error' && video.errorMessage && (
+                              <span className="text-xs text-destructive">
+                                Error details: {video.errorMessage}
+                              </span>
+                            )}
+
                             {video.segmentCount > 0 && (
                               <span className="text-xs text-muted-foreground">
                                 {video.segmentCount} quiz checkpoints

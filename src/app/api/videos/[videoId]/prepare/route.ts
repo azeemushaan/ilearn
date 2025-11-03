@@ -18,13 +18,14 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { videoId: string } }
 ) {
+  const { videoId } = params;
+
   try {
-    const { videoId } = params;
     const body = await request.json();
-    const { 
-      captionContent, 
-      captionFormat = 'srt', 
-      forceReprocess = false 
+    const {
+      captionContent,
+      captionFormat = 'srt',
+      forceReprocess = false
     } = body;
 
     const db = adminFirestore();
@@ -55,12 +56,14 @@ export async function POST(
         message: 'Video already processed',
         videoId,
         status: 'ready',
+        errorMessage: videoData.errorMessage ?? null,
       });
     }
 
     // Update status to processing
     await videoRef.update({
       status: 'processing',
+      errorMessage: null,
       updatedAt: Timestamp.now(),
     });
 
@@ -113,63 +116,109 @@ export async function POST(
 
       // Store segments and generate questions
       const segmentRefs: string[] = [];
+      let lastSegmentContext: { index: number; difficulty: string } | null = null;
+
+      const summarize = (text: string) => {
+        const normalized = text.trim();
+        if (normalized.length <= 100) {
+          return normalized;
+        }
+
+        return `${normalized.slice(0, 97)}...`;
+      };
+
+      const logSegmentError = (index: number, difficulty: string, error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? error.stack : undefined;
+        console.error('[prepareVideo] Segment processing failed', {
+          videoId,
+          segmentIndex: index,
+          difficulty,
+          message,
+          stack,
+        });
+      };
 
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        
-        // Create segment document
-        const segmentRef = await db.collection(`videos/${videoId}/segments`).add({
-          coachId,
-          videoId,
-          tStartSec: segment.tStartSec,
-          tEndSec: segment.tEndSec,
-          textChunk: segment.textChunk,
-          textChunkHash: segment.textChunkHash,
-          summary: segment.textChunk.substring(0, 100) + '...',
-          difficulty: i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard',
-          questionCount: 0,
-          createdAt: Timestamp.now(),
-        });
+        const difficulty = i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard';
+        lastSegmentContext = { index: i, difficulty };
 
-        segmentRefs.push(segmentRef.id);
-
-        // Generate MCQs for this segment
-        const mcqResult = await generateMcq({
-          transcriptChunk: segment.textChunk,
-          videoTitle: videoData.title,
-          chapterName: `Segment ${i + 1}`,
-          gradeBand: '1-8', // Default for now
-          locale: 'en',
-          difficultyTarget: i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard',
-        });
-
-        // Store questions
-        let questionCount = 0;
-        for (const question of mcqResult.questions) {
-          await db.collection(`videos/${videoId}/segments/${segmentRef.id}/questions`).add({
-            segmentId: segmentRef.id,
-            videoId,
-            stem: question.stem,
-            options: question.options,
-            correctIndex: question.correctIndex,
-            rationale: question.rationale,
-            tags: question.tags,
-            difficulty: question.difficulty,
-            createdAt: Timestamp.now(),
+        let mcqResult: Awaited<ReturnType<typeof generateMcq>>;
+        try {
+          mcqResult = await generateMcq({
+            transcriptChunk: segment.textChunk,
+            videoTitle: videoData.title,
+            chapterName: `Segment ${i + 1}`,
+            gradeBand: '1-8', // Default for now
+            locale: 'en',
+            difficultyTarget: difficulty,
           });
-          questionCount++;
+        } catch (mcqError) {
+          logSegmentError(i, difficulty, mcqError);
+          throw mcqError;
         }
 
-        // Update segment question count
-        await segmentRef.update({
-          questionCount,
-        });
+        const questions = Array.isArray(mcqResult?.questions) ? mcqResult!.questions : [];
+
+        const segmentRef = db.collection(`videos/${videoId}/segments`).doc();
+        const now = Timestamp.now();
+        const segmentData = {
+          videoId,
+          coachId: videoData.coachId ?? null,
+          segmentIndex: i,
+          tStartSec: segment.tStartSec,
+          tEndSec: segment.tEndSec,
+          durationSec: Math.max(0, segment.tEndSec - segment.tStartSec),
+          textChunk: segment.textChunk,
+          textChunkHash: segment.textChunkHash,
+          summary: summarize(segment.textChunk),
+          difficulty,
+          questionCount: questions.length,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        const batch = db.batch();
+        batch.set(segmentRef, segmentData);
+
+        if (questions.length > 0) {
+          const questionCollectionPath = `videos/${videoId}/segments/${segmentRef.id}/questions`;
+          questions.forEach((question, questionIndex) => {
+            const questionRef = db.collection(questionCollectionPath).doc();
+            batch.set(questionRef, {
+              segmentId: segmentRef.id,
+              videoId,
+              coachId: videoData.coachId ?? null,
+              difficulty: question.difficulty ?? difficulty,
+              stem: question.stem,
+              options: Array.isArray(question.options) ? question.options : [],
+              correctIndex: question.correctIndex,
+              rationale: question.rationale,
+              tags: Array.isArray(question.tags) ? question.tags : [],
+              createdAt: now,
+              updatedAt: now,
+              sequenceIndex: questionIndex,
+            });
+          });
+        }
+
+        try {
+          await batch.commit();
+        } catch (writeError) {
+          logSegmentError(i, difficulty, writeError);
+          throw writeError;
+        }
+
+        segmentRefs.push(segmentRef.id);
+        lastSegmentContext = null;
       }
 
       // Update video status to ready
       await videoRef.update({
         status: 'ready',
         segmentCount: segments.length,
+        errorMessage: null,
         updatedAt: Timestamp.now(),
       });
 
@@ -180,20 +229,27 @@ export async function POST(
         segmentsCreated: segments.length,
         segmentRefs,
         status: 'ready',
+        errorMessage: null,
       });
     } catch (error: any) {
       // Update video status to error
+      const baseMessage = error?.message || 'Failed to prepare video';
+      const contextualMessage = lastSegmentContext
+        ? `Segment ${lastSegmentContext.index + 1} (${lastSegmentContext.difficulty}) ${baseMessage}`
+        : baseMessage;
+
       await videoRef.update({
         status: 'error',
+        errorMessage: contextualMessage,
         updatedAt: Timestamp.now(),
       });
 
-      console.error('prepareVideo.processFailure', {
-        videoId,
-        error: toLoggableError(error),
-      });
+      if (error instanceof Error) {
+        error.message = contextualMessage;
+        throw error;
+      }
 
-      throw error;
+      throw new Error(contextualMessage);
     }
   } catch (error: any) {
     const status = error instanceof McqGenerationError ? 502 : 500;
@@ -204,8 +260,14 @@ export async function POST(
       status,
     });
     return NextResponse.json(
-      { error: error.message || 'Failed to prepare video' },
-      { status }
+      {
+        success: false,
+        error: error.message || 'Failed to prepare video',
+        errorMessage: error.message || 'Failed to prepare video',
+        status: 'error',
+        videoId,
+      },
+      { status: 500 }
     );
   }
 }
