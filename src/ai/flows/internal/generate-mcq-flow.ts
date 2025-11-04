@@ -39,42 +39,6 @@ type PromptContext = {
   model: string;
 };
 
-function buildFallbackQuestion(input: GenerateMcqInput) {
-  const cleanedTranscript = input.transcriptChunk.replace(/\s+/g, ' ').trim();
-  const sentenceMatches = cleanedTranscript.match(/[^.!?]+[.!?]?/g) || [];
-  const candidateSentence =
-    sentenceMatches.sort((a, b) => b.length - a.length)[0]?.trim() ||
-    cleanedTranscript.slice(0, 140).trim();
-
-  const mainIdea =
-    candidateSentence || `This segment focuses on the topic "${input.chapterName}".`;
-
-  const clamp = (text: string) =>
-    text.length > 140 ? `${text.slice(0, 137)}...` : text;
-
-  const distractors = [
-    `It mainly discusses an unrelated topic instead of ${input.chapterName}.`,
-    `The segment introduces a completely different lesson from "${input.videoTitle}".`,
-    `It summarises the video without touching on the highlighted concept.`,
-  ].map(option => clamp(option));
-
-  const correctOption = clamp(
-    mainIdea || `It explains the key idea of ${input.chapterName}.`,
-  );
-
-  const options = [correctOption, ...distractors];
-
-  return {
-    stem: `What is the primary idea covered in this part of "${input.videoTitle}"?`,
-    options,
-    correctIndex: 0,
-    rationale:
-      'This option reflects the main idea described in the transcript snippet.',
-    tags: [input.chapterName, input.difficultyTarget].filter(Boolean),
-    difficulty: input.difficultyTarget,
-  };
-}
-
 export const GenerateMcqOutputSchema = z.object({
   questions: z.array(
     z.object({
@@ -104,6 +68,10 @@ export async function generateMcq(input: GenerateMcqInput): Promise<GenerateMcqO
   try {
     return await generateMcqFlow(input);
   } catch (error) {
+    const segmentId =
+      input.videoId ??
+      [input.videoTitle, input.chapterName].filter(Boolean).join('#') ||
+      'unknown-segment';
     if (error instanceof McqGenerationError) {
       throw error;
     }
@@ -112,6 +80,9 @@ export async function generateMcq(input: GenerateMcqInput): Promise<GenerateMcqO
       videoTitle: input.videoTitle,
       chapterName: input.chapterName,
       difficultyTarget: input.difficultyTarget,
+      segmentId,
+      videoId: input.videoId,
+      coachId: input.coachId,
     });
 
     if (typeof error === 'object' && error !== null) {
@@ -119,6 +90,7 @@ export async function generateMcq(input: GenerateMcqInput): Promise<GenerateMcqO
     }
 
     console.error('generateMcq.unexpectedFailure', {
+      segmentId,
       message: wrappedError.message,
       metadata: wrappedError.metadata,
       cause:
@@ -238,6 +210,10 @@ export const generateMcqFlow = ai.defineFlow(
   },
   async input => {
     const promptContext = await resolvePromptContext();
+    const segmentId =
+      input.videoId ??
+      [input.videoTitle, input.chapterName].filter(Boolean).join('#') ||
+      'unknown-segment';
     try {
       const {output} = await generateMcqPrompt(input, {
         context: { promptTemplate: promptContext.template },
@@ -260,11 +236,25 @@ export const generateMcqFlow = ai.defineFlow(
         return output;
       }
 
-      throw new McqGenerationError('MCQ generation returned no questions', {
-        videoTitle: input.videoTitle,
-        chapterName: input.chapterName,
-        difficultyTarget: input.difficultyTarget,
+      const noQuestionsError = new McqGenerationError(
+        'Genkit returned no MCQs for the provided video segment.',
+        {
+          videoTitle: input.videoTitle,
+          chapterName: input.chapterName,
+          difficultyTarget: input.difficultyTarget,
+          segmentId,
+          videoId: input.videoId,
+          coachId: input.coachId,
+        },
+      );
+
+      console.error('generateMcqFlow.noQuestions', {
+        segmentId,
+        message: noQuestionsError.message,
+        metadata: noQuestionsError.metadata,
       });
+
+      throw noQuestionsError;
     } catch (error) {
       await safeRecordPromptUsage({
         promptId: promptContext.promptId,
@@ -282,6 +272,7 @@ export const generateMcqFlow = ai.defineFlow(
       });
       if (error instanceof McqGenerationError) {
         console.error('generateMcqFlow.emptyResponse', {
+          segmentId,
           message: error.message,
           metadata: error.metadata,
         });
@@ -292,6 +283,9 @@ export const generateMcqFlow = ai.defineFlow(
         videoTitle: input.videoTitle,
         chapterName: input.chapterName,
         difficultyTarget: input.difficultyTarget,
+        segmentId,
+        videoId: input.videoId,
+        coachId: input.coachId,
       });
 
       if (typeof error === 'object' && error !== null) {
@@ -299,6 +293,7 @@ export const generateMcqFlow = ai.defineFlow(
       }
 
       console.error('generateMcqFlow.error', {
+        segmentId,
         message: wrappedError.message,
         metadata: wrappedError.metadata,
         cause:
