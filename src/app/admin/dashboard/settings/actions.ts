@@ -1,7 +1,9 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { updateSystemAiSettings, updateSystemSettings } from '@/lib/firestore/admin-ops';
+import { invalidateAiEngineCache } from '@/ai/genkit';
+import { runAiConnectionTest } from '@/lib/ai/test-connection';
+import { updateSystemAiSettings, updateSystemSettings, writeAudit } from '@/lib/firestore/admin-ops';
 import { requireAdmin } from '@/lib/auth/server';
 
 export async function updateSettingsAction(formData: FormData) {
@@ -44,6 +46,67 @@ export async function updateAiSettingsAction(formData: FormData) {
   }
 
   await updateSystemAiSettings(updates, admin.uid);
+  invalidateAiEngineCache();
   revalidatePath('/admin/dashboard/settings');
   revalidatePath('/admin/dashboard/settings/prompts');
+}
+
+export type TestAiConnectionState = {
+  status: 'idle' | 'success' | 'error';
+  message?: string;
+  provider?: string;
+  model?: string;
+  latencyMs?: number;
+  reply?: string;
+};
+
+export const initialTestAiConnectionState: TestAiConnectionState = Object.freeze({ status: 'idle' } satisfies TestAiConnectionState);
+
+export async function testAiConnectionAction(
+  _prevState: TestAiConnectionState,
+  _formData: FormData,
+): Promise<TestAiConnectionState> {
+  const admin = await requireAdmin();
+
+  try {
+    const result = await runAiConnectionTest();
+    await writeAudit({
+      actorId: admin.uid,
+      action: 'settings.ai.testConnection',
+      target: { collection: 'settings', id: 'system.ai' },
+      meta: {
+        provider: result.provider,
+        model: result.model,
+        latencyMs: result.latencyMs,
+      },
+    });
+
+    return {
+      status: 'success',
+      provider: result.provider,
+      model: result.model,
+      latencyMs: result.latencyMs,
+      reply: result.reply,
+      message: `Connected to ${result.provider} (${result.model}) in ${result.latencyMs.toFixed(0)}ms.`,
+    } satisfies TestAiConnectionState;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to test AI settings.';
+    console.error('settings.ai.testConnectionFailed', {
+      adminId: admin.uid,
+      message,
+      cause: error instanceof Error ? { name: error.name, stack: error.stack } : { value: error },
+    });
+
+    await writeAudit({
+      actorId: admin.uid,
+      action: 'settings.ai.testConnectionFailed',
+      target: { collection: 'settings', id: 'system.ai' },
+      meta: { error: message },
+    });
+
+    return {
+      status: 'error',
+      message,
+    } satisfies TestAiConnectionState;
+  }
 }

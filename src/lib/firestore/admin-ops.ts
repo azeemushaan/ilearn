@@ -128,6 +128,13 @@ function maskApiKey(apiKey: string) {
   return `${start}••••${end}`;
 }
 
+function maskSecretReference(secret: string) {
+  if (!secret) return '••••';
+  const trimmed = secret.trim();
+  if (trimmed.length <= 4) return '••••';
+  return `••••${trimmed.slice(-4)}`;
+}
+
 export async function getSystemAiSettings(): Promise<SystemAiSettings> {
   const doc = await adminFirestore().collection('settings').doc('system.ai').get();
   if (!doc.exists) {
@@ -150,14 +157,24 @@ export async function getSystemAiSettings(): Promise<SystemAiSettings> {
   const activePromptId = typeof data.activePromptId === 'string' && data.activePromptId.length > 0
     ? data.activePromptId
     : null;
-  const apiKey = typeof data.apiKey === 'string' ? data.apiKey : null;
+  const apiKey = typeof data.apiKey === 'string' && data.apiKey.trim().length > 0 ? data.apiKey : null;
+  const apiKeySecret = typeof data.apiKeySecret === 'string' && data.apiKeySecret.trim().length > 0
+    ? data.apiKeySecret
+    : null;
+
+  let apiKeyMask: string | null = null;
+  if (apiKey) {
+    apiKeyMask = maskApiKey(apiKey);
+  } else if (apiKeySecret) {
+    apiKeyMask = `Secret ${maskSecretReference(apiKeySecret)}`;
+  }
 
   return {
     provider,
     model,
     activePromptId,
-    apiKeyMask: maskApiKey(apiKey ?? ''),
-    hasApiKey: Boolean(apiKey),
+    apiKeyMask,
+    hasApiKey: Boolean(apiKey ?? apiKeySecret),
   } satisfies SystemAiSettings;
 }
 
@@ -166,6 +183,7 @@ type UpdateAiSettingsInput = Partial<{
   model: string;
   apiKey: string | null;
   activePromptId: string | null;
+  apiKeySecret: string | null;
 }>;
 
 export async function updateSystemAiSettings(settings: UpdateAiSettingsInput, actorId: string) {
@@ -180,6 +198,13 @@ export async function updateSystemAiSettings(settings: UpdateAiSettingsInput, ac
 
   if (typeof settings.model === 'string' && settings.model.trim()) {
     payload.model = settings.model.trim();
+  }
+
+  if (settings.apiKeySecret !== undefined) {
+    const sanitizedSecret = settings.apiKeySecret && settings.apiKeySecret.trim().length > 0
+      ? settings.apiKeySecret.trim()
+      : null;
+    payload.apiKeySecret = sanitizedSecret;
   }
 
   if (settings.apiKey !== undefined) {
@@ -197,6 +222,7 @@ export async function updateSystemAiSettings(settings: UpdateAiSettingsInput, ac
   const meta: Record<string, unknown> = {};
   if (payload.provider) meta.provider = payload.provider;
   if (payload.model) meta.model = payload.model;
+  if ('apiKeySecret' in payload) meta.apiKeySecretUpdated = Boolean(payload.apiKeySecret);
   if ('apiKey' in payload) meta.apiKeyUpdated = Boolean(payload.apiKey);
   if ('activePromptId' in payload) meta.activePromptId = payload.activePromptId;
 
@@ -266,6 +292,7 @@ export async function createPromptTemplate(data: PromptTemplatePayload, actorId:
     description: data.description?.trim() || null,
     content,
     active: Boolean(data.active),
+    version: 1,
     createdAt: now,
     updatedAt: now,
   };
@@ -276,7 +303,7 @@ export async function createPromptTemplate(data: PromptTemplatePayload, actorId:
     actorId,
     action: 'prompt.create',
     target: { collection: 'prompts', id: ref.id },
-    meta: { name: payload.name, active: payload.active },
+    meta: { name: payload.name, active: payload.active, version: payload.version },
   });
 
   if (payload.active) {
@@ -297,27 +324,44 @@ export async function updatePromptTemplate(
   if (!snapshot.exists) throw new Error('Prompt template not found');
 
   const current = promptTemplateSchema.parse({ ...snapshot.data(), id });
-  const updates: Record<string, unknown> = { updatedAt: nowTimestamp() };
+  const now = nowTimestamp();
+  const currentVersion = typeof current.version === 'number' && current.version > 0 ? current.version : 1;
+  const updates: Record<string, unknown> = { updatedAt: now };
+  let shouldBumpVersion = false;
 
   if (typeof data.name === 'string') {
     const trimmed = data.name.trim();
     if (!trimmed) throw new Error('Prompt name cannot be empty');
-    updates.name = trimmed;
+    if (trimmed !== current.name) {
+      updates.name = trimmed;
+      shouldBumpVersion = true;
+    }
   }
 
   if (data.description !== undefined) {
     const trimmed = data.description ? data.description.trim() : null;
-    updates.description = trimmed;
+    const currentDescription = current.description ?? null;
+    if (trimmed !== currentDescription) {
+      updates.description = trimmed;
+      shouldBumpVersion = true;
+    }
   }
 
   if (typeof data.content === 'string') {
     const trimmed = data.content.trim();
     if (!trimmed) throw new Error('Prompt content cannot be empty');
-    updates.content = trimmed;
+    if (trimmed !== current.content) {
+      updates.content = trimmed;
+      shouldBumpVersion = true;
+    }
   }
 
   if (typeof data.active === 'boolean') {
     updates.active = data.active;
+  }
+
+  if (shouldBumpVersion) {
+    updates.version = currentVersion + 1;
   }
 
   await docRef.update(updates);
