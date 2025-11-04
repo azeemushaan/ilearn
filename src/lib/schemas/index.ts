@@ -239,6 +239,15 @@ export type SystemSettings = z.infer<typeof systemSettingsSchema>;
 
 // Core LMS schemas for YouTube playlist assignments
 
+const transcriptMetadataSchema = z.object({
+  storagePath: z.string().min(1),
+  format: z.enum(['srt', 'vtt']),
+  originalFilename: z.string().optional(),
+  cueCount: z.number().int().min(0).optional(),
+  uploadedAt: nullableTimestamp,
+  updatedAt: nullableTimestamp,
+});
+
 export const playlistSchema = z.object({
   coachId: z.string().min(1),
   title: z.string().min(1),
@@ -265,6 +274,7 @@ export const videoSchema = z.object({
   chaptersOnly: z.boolean().default(false),
   status: z.enum(['pending', 'processing', 'ready', 'error']).default('pending'),
   segmentCount: z.number().int().min(0).default(0),
+  transcript: transcriptMetadataSchema.nullish(),
   createdAt: nullableTimestamp,
   updatedAt: nullableTimestamp,
 });

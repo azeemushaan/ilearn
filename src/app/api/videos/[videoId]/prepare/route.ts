@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminFirestore } from '@/lib/firebase/admin';
+import { adminFirestore, adminStorage } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
-import type { FirebaseFirestore } from 'firebase-admin/firestore';
+import type { DocumentReference } from 'firebase-admin/firestore';
 import { 
   parseSRT, 
   parseVTT, 
@@ -15,19 +15,54 @@ const toLoggableError = (error: unknown) =>
     ? { name: error.name, message: error.message, stack: error.stack }
     : { message: String(error) };
 
+type CaptionFormat = 'srt' | 'vtt';
+
+const inferFormatFromPath = (path: string): CaptionFormat =>
+  path.toLowerCase().endsWith('.vtt') ? 'vtt' : 'srt';
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { videoId: string } }
 ) {
   const { videoId } = params;
 
+  let lastSegmentContext: { index: number; difficulty: string } | null = null;
+
+  const logSegmentError = (index: number, difficulty: string, error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error('[prepareVideo] Segment processing failed', {
+      videoId,
+      segmentIndex: index,
+      difficulty,
+      message,
+      stack,
+    });
+  };
+
   try {
-    const body = await request.json();
-    const {
-      captionContent,
-      captionFormat = 'srt',
-      forceReprocess = false
-    } = body;
+    let body: Record<string, unknown> = {};
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('prepareVideoRoute.requestBodyParseFailed', parseError);
+      }
+    }
+
+    const bodyCaptionContent = typeof body['captionContent'] === 'string'
+      ? (body['captionContent'] as string)
+      : null;
+    const bodyCaptionFormat =
+      body['captionFormat'] === 'vtt'
+        ? 'vtt'
+        : body['captionFormat'] === 'srt'
+          ? 'srt'
+          : null;
+    const forceReprocess =
+      typeof body['forceReprocess'] === 'boolean'
+        ? (body['forceReprocess'] as boolean)
+        : false;
 
     const db = adminFirestore();
     const videoRef = db.collection('videos').doc(videoId);
@@ -82,32 +117,76 @@ export async function POST(
         }
       }
 
-      let segments;
+      let captionContent = bodyCaptionContent;
+      let captionFormat: CaptionFormat | null = bodyCaptionFormat;
 
-      // Strategy 1: Use provided captions
+      const transcriptInfo = (videoData.transcript ?? null) as
+        | {
+            storagePath?: string;
+            format?: CaptionFormat;
+          }
+        | null;
+
+      if (!captionContent && transcriptInfo?.storagePath) {
+        try {
+          const bucket = adminStorage().bucket();
+          const file = bucket.file(transcriptInfo.storagePath);
+          const [exists] = await file.exists();
+
+          if (exists) {
+            const [buffer] = await file.download();
+            captionContent = buffer.toString('utf8');
+
+            if (!captionFormat) {
+              captionFormat = transcriptInfo?.format ?? inferFormatFromPath(transcriptInfo.storagePath);
+            }
+          } else {
+            console.warn('prepareVideoRoute.transcriptMissing', {
+              videoId,
+              storagePath: transcriptInfo.storagePath,
+            });
+          }
+        } catch (transcriptError) {
+          console.error('prepareVideoRoute.transcriptDownloadFailed', {
+            videoId,
+            error: toLoggableError(transcriptError),
+            storagePath: transcriptInfo?.storagePath,
+          });
+        }
+      }
+
+      let segments;
+      let usedTranscript = false;
+
       if (captionContent) {
-        const cues = captionFormat === 'vtt' 
+        const effectiveFormat: CaptionFormat = captionFormat === 'vtt' ? 'vtt' : 'srt';
+        const cues = effectiveFormat === 'vtt'
           ? parseVTT(captionContent)
           : parseSRT(captionContent);
 
-        segments = segmentTranscript(cues, {
+        const transcriptSegments = segmentTranscript(cues, {
           minDuration: 30,
           maxDuration: 60,
           preferredDuration: 45,
         });
 
-        await videoRef.update({
-          hasCaptions: true,
-          chaptersOnly: false,
-        });
-      } 
-      // Strategy 2: Fallback to uniform segments
-      else {
+        if (transcriptSegments.length > 0) {
+          segments = transcriptSegments;
+          usedTranscript = true;
+        }
+      }
+
+      if (!segments || segments.length === 0) {
         segments = createUniformSegments(videoData.duration, 45);
-        
+
         await videoRef.update({
           hasCaptions: false,
           chaptersOnly: true, // Using uniform segments as fallback
+        });
+      } else if (usedTranscript) {
+        await videoRef.update({
+          hasCaptions: true,
+          chaptersOnly: false,
         });
       }
 
@@ -117,14 +196,13 @@ export async function POST(
 
       // Store segments and generate questions
       const segmentRefs: string[] = [];
-      let lastSegmentContext: { index: number; difficulty: string } | null = null;
       const pendingSegmentWrites: Array<{
         index: number;
         difficulty: string;
-        segmentRef: FirebaseFirestore.DocumentReference;
+        segmentRef: DocumentReference;
         segmentData: Record<string, unknown>;
         questionWrites: Array<{
-          ref: FirebaseFirestore.DocumentReference;
+          ref: DocumentReference;
           data: Record<string, unknown>;
         }>;
       }> = [];
@@ -136,18 +214,6 @@ export async function POST(
         }
 
         return `${normalized.slice(0, 97)}...`;
-      };
-
-      const logSegmentError = (index: number, difficulty: string, error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? error.stack : undefined;
-        console.error('[prepareVideo] Segment processing failed', {
-          videoId,
-          segmentIndex: index,
-          difficulty,
-          message,
-          stack,
-        });
       };
 
       for (let i = 0; i < segments.length; i++) {
