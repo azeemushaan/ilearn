@@ -69,14 +69,17 @@ export default async function PromptSettingsPage() {
         ) : (
           prompts.map(prompt => (
             <Card key={prompt.id}>
-              <CardHeader className="flex flex-row items-start justify-between gap-4">
+              <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <CardTitle>{prompt.name}</CardTitle>
                   {prompt.description ? (
                     <p className="text-sm text-muted-foreground">{prompt.description}</p>
                   ) : null}
                 </div>
-                {prompt.active ? <Badge variant="secondary">Active</Badge> : null}
+                <div className="flex items-center gap-2 self-start">
+                  <Badge variant="outline">v{prompt.version}</Badge>
+                  {prompt.active ? <Badge variant="secondary">Active</Badge> : null}
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <form action={updatePromptTemplateAction} className="space-y-4">

@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { invalidateAiEngineCache } from '@/ai/genkit';
 import { requireAdmin } from '@/lib/auth/server';
 import {
   createPromptTemplate,
@@ -38,6 +39,7 @@ export async function createPromptTemplateAction(formData: FormData) {
     admin.uid,
   );
 
+  invalidateAiEngineCache();
   revalidatePath('/admin/dashboard/settings/prompts');
   revalidatePath('/admin/dashboard/settings');
 }
@@ -73,6 +75,7 @@ export async function updatePromptTemplateAction(formData: FormData) {
     admin.uid,
   );
 
+  invalidateAiEngineCache();
   revalidatePath('/admin/dashboard/settings/prompts');
   revalidatePath('/admin/dashboard/settings');
 }
@@ -86,6 +89,7 @@ export async function deletePromptTemplateAction(formData: FormData) {
   }
 
   await deletePromptTemplate(id, admin.uid);
+  invalidateAiEngineCache();
   revalidatePath('/admin/dashboard/settings/prompts');
   revalidatePath('/admin/dashboard/settings');
 }

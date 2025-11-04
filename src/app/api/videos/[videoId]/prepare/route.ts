@@ -1,19 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminFirestore } from '@/lib/firebase/admin';
+import { adminFirestore, adminStorage } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import type { DocumentReference } from 'firebase-admin/firestore';
 import { 
   parseSRT, 
   parseVTT, 
   segmentTranscript, 
   createUniformSegments 
 } from '@/lib/youtube/segmentation';
-import {generateMcq} from '@/ai/flows/generate-mcq';
-import {McqGenerationError} from '@/ai/flows/internal/generate-mcq-flow';
+import { generateMcq } from '@/ai/flows/generate-mcq';
 
 const toLoggableError = (error: unknown) =>
   error instanceof Error
     ? { name: error.name, message: error.message, stack: error.stack }
     : { message: String(error) };
+
+type CaptionFormat = 'srt' | 'vtt';
+
+const inferFormatFromPath = (path: string): CaptionFormat =>
+  path.toLowerCase().endsWith('.vtt') ? 'vtt' : 'srt';
 
 export async function POST(
   request: NextRequest,
@@ -21,13 +26,43 @@ export async function POST(
 ) {
   const { videoId } = params;
 
+  let lastSegmentContext: { index: number; difficulty: string } | null = null;
+
+  const logSegmentError = (index: number, difficulty: string, error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error('[prepareVideo] Segment processing failed', {
+      videoId,
+      segmentIndex: index,
+      difficulty,
+      message,
+      stack,
+    });
+  };
+
   try {
-    const body = await request.json();
-    const {
-      captionContent,
-      captionFormat = 'srt',
-      forceReprocess = false
-    } = body;
+    let body: Record<string, unknown> = {};
+    try {
+      body = await request.json();
+    } catch (parseError) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('prepareVideoRoute.requestBodyParseFailed', parseError);
+      }
+    }
+
+    const bodyCaptionContent = typeof body['captionContent'] === 'string'
+      ? (body['captionContent'] as string)
+      : null;
+    const bodyCaptionFormat =
+      body['captionFormat'] === 'vtt'
+        ? 'vtt'
+        : body['captionFormat'] === 'srt'
+          ? 'srt'
+          : null;
+    const forceReprocess =
+      typeof body['forceReprocess'] === 'boolean'
+        ? (body['forceReprocess'] as boolean)
+        : false;
 
     const db = adminFirestore();
     const videoRef = db.collection('videos').doc(videoId);
@@ -82,32 +117,76 @@ export async function POST(
         }
       }
 
-      let segments;
+      let captionContent = bodyCaptionContent;
+      let captionFormat: CaptionFormat | null = bodyCaptionFormat;
 
-      // Strategy 1: Use provided captions
+      const transcriptInfo = (videoData.transcript ?? null) as
+        | {
+            storagePath?: string;
+            format?: CaptionFormat;
+          }
+        | null;
+
+      if (!captionContent && transcriptInfo?.storagePath) {
+        try {
+          const bucket = adminStorage().bucket();
+          const file = bucket.file(transcriptInfo.storagePath);
+          const [exists] = await file.exists();
+
+          if (exists) {
+            const [buffer] = await file.download();
+            captionContent = buffer.toString('utf8');
+
+            if (!captionFormat) {
+              captionFormat = transcriptInfo?.format ?? inferFormatFromPath(transcriptInfo.storagePath);
+            }
+          } else {
+            console.warn('prepareVideoRoute.transcriptMissing', {
+              videoId,
+              storagePath: transcriptInfo.storagePath,
+            });
+          }
+        } catch (transcriptError) {
+          console.error('prepareVideoRoute.transcriptDownloadFailed', {
+            videoId,
+            error: toLoggableError(transcriptError),
+            storagePath: transcriptInfo?.storagePath,
+          });
+        }
+      }
+
+      let segments;
+      let usedTranscript = false;
+
       if (captionContent) {
-        const cues = captionFormat === 'vtt' 
+        const effectiveFormat: CaptionFormat = captionFormat === 'vtt' ? 'vtt' : 'srt';
+        const cues = effectiveFormat === 'vtt'
           ? parseVTT(captionContent)
           : parseSRT(captionContent);
 
-        segments = segmentTranscript(cues, {
+        const transcriptSegments = segmentTranscript(cues, {
           minDuration: 30,
           maxDuration: 60,
           preferredDuration: 45,
         });
 
-        await videoRef.update({
-          hasCaptions: true,
-          chaptersOnly: false,
-        });
-      } 
-      // Strategy 2: Fallback to uniform segments
-      else {
+        if (transcriptSegments.length > 0) {
+          segments = transcriptSegments;
+          usedTranscript = true;
+        }
+      }
+
+      if (!segments || segments.length === 0) {
         segments = createUniformSegments(videoData.duration, 45);
-        
+
         await videoRef.update({
           hasCaptions: false,
           chaptersOnly: true, // Using uniform segments as fallback
+        });
+      } else if (usedTranscript) {
+        await videoRef.update({
+          hasCaptions: true,
+          chaptersOnly: false,
         });
       }
 
@@ -117,7 +196,16 @@ export async function POST(
 
       // Store segments and generate questions
       const segmentRefs: string[] = [];
-      let lastSegmentContext: { index: number; difficulty: string } | null = null;
+      const pendingSegmentWrites: Array<{
+        index: number;
+        difficulty: string;
+        segmentRef: DocumentReference;
+        segmentData: Record<string, unknown>;
+        questionWrites: Array<{
+          ref: DocumentReference;
+          data: Record<string, unknown>;
+        }>;
+      }> = [];
 
       const summarize = (text: string) => {
         const normalized = text.trim();
@@ -128,39 +216,21 @@ export async function POST(
         return `${normalized.slice(0, 97)}...`;
       };
 
-      const logSegmentError = (index: number, difficulty: string, error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? error.stack : undefined;
-        console.error('[prepareVideo] Segment processing failed', {
-          videoId,
-          segmentIndex: index,
-          difficulty,
-          message,
-          stack,
-        });
-      };
-
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
         const difficulty = i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard';
         lastSegmentContext = { index: i, difficulty };
 
-        let mcqResult: Awaited<ReturnType<typeof generateMcq>>;
-        try {
-          mcqResult = await generateMcq({
-            transcriptChunk: segment.textChunk,
-            videoTitle: videoData.title,
-            chapterName: `Segment ${i + 1}`,
-            gradeBand: '1-8', // Default for now
-            locale: 'en',
-            difficultyTarget: difficulty,
-            coachId,
-            videoId,
-          });
-        } catch (mcqError) {
-          logSegmentError(i, difficulty, mcqError);
-          throw mcqError;
-        }
+        const mcqResult = await generateMcq({
+          transcriptChunk: segment.textChunk,
+          videoTitle: videoData.title,
+          chapterName: `Segment ${i + 1}`,
+          gradeBand: '1-8', // Default for now
+          locale: 'en',
+          difficultyTarget: difficulty,
+          coachId,
+          videoId,
+        });
 
         const questions = Array.isArray(mcqResult?.questions) ? mcqResult!.questions : [];
 
@@ -182,38 +252,51 @@ export async function POST(
           updatedAt: now,
         };
 
-        const batch = db.batch();
-        batch.set(segmentRef, segmentData);
+        const questionWrites = questions.map((question, questionIndex) => ({
+          ref: db.collection(`videos/${videoId}/segments/${segmentRef.id}/questions`).doc(),
+          data: {
+            segmentId: segmentRef.id,
+            videoId,
+            coachId: videoData.coachId ?? null,
+            difficulty: question.difficulty ?? difficulty,
+            stem: question.stem,
+            options: Array.isArray(question.options) ? question.options : [],
+            correctIndex: question.correctIndex,
+            rationale: question.rationale,
+            tags: Array.isArray(question.tags) ? question.tags : [],
+            createdAt: now,
+            updatedAt: now,
+            sequenceIndex: questionIndex,
+          },
+        }));
 
-        if (questions.length > 0) {
-          const questionCollectionPath = `videos/${videoId}/segments/${segmentRef.id}/questions`;
-          questions.forEach((question, questionIndex) => {
-            const questionRef = db.collection(questionCollectionPath).doc();
-            batch.set(questionRef, {
-              segmentId: segmentRef.id,
-              videoId,
-              coachId: videoData.coachId ?? null,
-              difficulty: question.difficulty ?? difficulty,
-              stem: question.stem,
-              options: Array.isArray(question.options) ? question.options : [],
-              correctIndex: question.correctIndex,
-              rationale: question.rationale,
-              tags: Array.isArray(question.tags) ? question.tags : [],
-              createdAt: now,
-              updatedAt: now,
-              sequenceIndex: questionIndex,
-            });
-          });
-        }
+        pendingSegmentWrites.push({
+          index: i,
+          difficulty,
+          segmentRef,
+          segmentData,
+          questionWrites,
+        });
+
+        lastSegmentContext = null;
+      }
+
+      for (const pending of pendingSegmentWrites) {
+        lastSegmentContext = { index: pending.index, difficulty: pending.difficulty };
+        const batch = db.batch();
+        batch.set(pending.segmentRef, pending.segmentData);
+        pending.questionWrites.forEach(({ ref, data }) => {
+          batch.set(ref, data);
+        });
 
         try {
           await batch.commit();
         } catch (writeError) {
-          logSegmentError(i, difficulty, writeError);
+          logSegmentError(pending.index, pending.difficulty, writeError);
           throw writeError;
         }
 
-        segmentRefs.push(segmentRef.id);
+        segmentRefs.push(pending.segmentRef.id);
         lastSegmentContext = null;
       }
 
@@ -241,26 +324,36 @@ export async function POST(
         ? `Segment ${lastSegmentContext.index + 1} (${lastSegmentContext.difficulty}) ${baseMessage}`
         : baseMessage;
 
+      if (lastSegmentContext) {
+        logSegmentError(lastSegmentContext.index, lastSegmentContext.difficulty, error);
+      }
+
       await videoRef.update({
         status: 'error',
         errorMessage: contextualMessage,
         updatedAt: Timestamp.now(),
       });
 
+      const segmentIndex = lastSegmentContext?.index ?? null;
+
       if (error instanceof Error) {
         error.message = contextualMessage;
+        (error as Error & { segmentIndex?: number | null }).segmentIndex = segmentIndex;
         throw error;
       }
 
-      throw new Error(contextualMessage);
+      const contextualError = new Error(contextualMessage);
+      (contextualError as Error & { segmentIndex?: number | null }).segmentIndex = segmentIndex;
+      throw contextualError;
     }
   } catch (error: any) {
-    const status = error instanceof McqGenerationError ? 502 : 500;
-
+    const status = 500;
+    const segmentIndex = typeof error?.segmentIndex === 'number' ? error.segmentIndex : null;
     console.error('prepareVideoRoute.error', {
       videoId: params.videoId,
       error: toLoggableError(error),
       status,
+      segmentIndex,
     });
     return NextResponse.json(
       {
@@ -269,8 +362,9 @@ export async function POST(
         errorMessage: error.message || 'Failed to prepare video',
         status: 'error',
         videoId,
+        segmentIndex,
       },
-      { status: 500 }
+      { status }
     );
   }
 }

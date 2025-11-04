@@ -84,6 +84,7 @@ export const aiSettingsSchema = z.object({
   provider: aiProviderSchema.default('google'),
   model: z.string().min(1),
   apiKey: z.string().nullish(),
+  apiKeySecret: z.string().nullish(),
   activePromptId: z.string().nullish(),
   updatedAt: nullableTimestamp,
 });
@@ -96,6 +97,7 @@ export const promptTemplateSchema = z.object({
   description: z.string().nullish(),
   content: z.string().min(1),
   active: z.boolean().default(false),
+  version: z.number().int().min(1).default(1),
   createdAt: nullableTimestamp,
   updatedAt: nullableTimestamp,
 });
@@ -202,6 +204,7 @@ export const aiSettingsSchema = z
     model: z.string().min(1).default(defaultAiSettings.model),
     baseUrl: z.string().url().optional(),
     apiKeySecret: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
     runtime: aiRuntimeSchema.default({}),
     requestHeaders: z.record(z.string()).default({}),
   })
@@ -236,6 +239,15 @@ export type SystemSettings = z.infer<typeof systemSettingsSchema>;
 
 // Core LMS schemas for YouTube playlist assignments
 
+const transcriptMetadataSchema = z.object({
+  storagePath: z.string().min(1),
+  format: z.enum(['srt', 'vtt']),
+  originalFilename: z.string().optional(),
+  cueCount: z.number().int().min(0).optional(),
+  uploadedAt: nullableTimestamp,
+  updatedAt: nullableTimestamp,
+});
+
 export const playlistSchema = z.object({
   coachId: z.string().min(1),
   title: z.string().min(1),
@@ -262,6 +274,7 @@ export const videoSchema = z.object({
   chaptersOnly: z.boolean().default(false),
   status: z.enum(['pending', 'processing', 'ready', 'error']).default('pending'),
   segmentCount: z.number().int().min(0).default(0),
+  transcript: transcriptMetadataSchema.nullish(),
   createdAt: nullableTimestamp,
   updatedAt: nullableTimestamp,
 });
