@@ -1,4 +1,3 @@
-import {cache} from 'react';
 import {genkit, z} from 'genkit';
 import {googleAI} from '@genkit-ai/google-genai';
 
@@ -11,6 +10,7 @@ type SystemAiConfig = {
   model: string;
   baseUrl?: string;
   apiKeySecret?: string;
+  apiKey?: string;
   runtime: AiRuntimeOptions;
   requestHeaders: Record<string, string>;
   activePromptId: string | null;
@@ -29,6 +29,9 @@ const OPENROUTER_DEFAULT_HEADERS = Object.freeze({
   'X-Title': 'iLearn LMS',
 });
 const MAX_TRANSPORT_RETRIES = 2;
+
+let systemAiConfigPromise: Promise<SystemAiConfig> | null = null;
+let aiEnginePromise: Promise<AiEngine> | null = null;
 
 function isOpenAiCompatible(provider: string) {
   return OPENAI_COMPATIBLE_PROVIDERS.has(provider.toLowerCase());
@@ -114,6 +117,10 @@ function sanitizeSystemAiConfig(raw: Record<string, unknown>): SystemAiConfig {
     ? raw.apiKeySecret.trim()
     : undefined;
 
+  const apiKey = typeof raw.apiKey === 'string' && raw.apiKey.trim().length > 0
+    ? raw.apiKey.trim()
+    : undefined;
+
   const activePromptId = typeof raw.activePromptId === 'string' && raw.activePromptId.trim().length > 0
     ? raw.activePromptId.trim()
     : null;
@@ -123,10 +130,18 @@ function sanitizeSystemAiConfig(raw: Record<string, unknown>): SystemAiConfig {
     model,
     baseUrl: sanitizeBaseUrl(raw.baseUrl),
     apiKeySecret,
+    apiKey,
     runtime: sanitizeRuntime(raw.runtime),
     requestHeaders: sanitizeHeadersRecord(raw.requestHeaders),
     activePromptId,
   } satisfies SystemAiConfig;
+}
+
+async function loadSystemAiConfig(forceRefresh = false): Promise<SystemAiConfig> {
+  if (forceRefresh || !systemAiConfigPromise) {
+    systemAiConfigPromise = fetchSystemAiConfig();
+  }
+  return systemAiConfigPromise;
 }
 
 function buildPromptRuntimeConfig(runtime?: AiRuntimeOptions | null) {
@@ -362,6 +377,7 @@ async function fetchSystemAiConfig(): Promise<SystemAiConfig> {
         requestHeaders: defaultAiSettings.requestHeaders,
         baseUrl: undefined,
         apiKeySecret: undefined,
+        apiKey: undefined,
         activePromptId: null,
       } satisfies SystemAiConfig;
     }
@@ -377,15 +393,14 @@ async function fetchSystemAiConfig(): Promise<SystemAiConfig> {
       requestHeaders: defaultAiSettings.requestHeaders,
       baseUrl: undefined,
       apiKeySecret: undefined,
+      apiKey: undefined,
       activePromptId: null,
     } satisfies SystemAiConfig;
   }
 }
 
-const getCachedSystemAiConfig = cache(fetchSystemAiConfig);
-
-async function createAiEngine(): Promise<AiEngine> {
-  const settings = await getCachedSystemAiConfig();
+async function createAiEngine(forceRefreshConfig = false): Promise<AiEngine> {
+  const settings = await loadSystemAiConfig(forceRefreshConfig);
   const normalizedProvider = settings.provider.toLowerCase();
   const runtimeConfig = Object.freeze(buildPromptRuntimeConfig(settings.runtime));
 
@@ -396,7 +411,7 @@ async function createAiEngine(): Promise<AiEngine> {
   });
 
   if (normalizedProvider === 'googleai' || normalizedProvider === 'google' || normalizedProvider === 'gemini') {
-    const apiKey = settings.apiKeySecret ? getServerSecret(settings.apiKeySecret) : undefined;
+    const apiKey = settings.apiKey ?? (settings.apiKeySecret ? getServerSecret(settings.apiKeySecret) : undefined);
     const plugins = [
       googleAI({
         apiKey,
@@ -413,8 +428,11 @@ async function createAiEngine(): Promise<AiEngine> {
   }
 
   if (isOpenAiCompatible(normalizedProvider)) {
-    const secretName = settings.apiKeySecret ?? 'openrouter/apiKey';
-    const apiKey = getServerSecret(secretName);
+    let apiKey = settings.apiKey;
+    if (!apiKey) {
+      const secretName = settings.apiKeySecret ?? 'openrouter/apiKey';
+      apiKey = getServerSecret(secretName);
+    }
     const instance = genkit({
       model: settings.model,
     });
@@ -440,6 +458,7 @@ async function createAiEngine(): Promise<AiEngine> {
       requestHeaders: defaultAiSettings.requestHeaders,
       baseUrl: undefined,
       apiKeySecret: undefined,
+      apiKey: undefined,
       activePromptId: null,
     },
     modelName: defaultAiSettings.model,
@@ -447,10 +466,26 @@ async function createAiEngine(): Promise<AiEngine> {
   } satisfies AiEngine;
 }
 
-const getCachedAiEngine = cache(createAiEngine);
+type GetAiEngineOptions = {
+  bypassCache?: boolean;
+  refresh?: boolean;
+};
 
-export async function getAiEngine(): Promise<AiEngine> {
-  return getCachedAiEngine();
+export async function getAiEngine(options?: GetAiEngineOptions): Promise<AiEngine> {
+  if (options?.bypassCache) {
+    return createAiEngine(options?.refresh ?? false);
+  }
+
+  if (!aiEnginePromise || options?.refresh) {
+    aiEnginePromise = createAiEngine(options?.refresh ?? false);
+  }
+
+  return aiEnginePromise;
+}
+
+export function invalidateAiEngineCache() {
+  aiEnginePromise = null;
+  systemAiConfigPromise = null;
 }
 
 export type {AiEngine, SystemAiConfig};
