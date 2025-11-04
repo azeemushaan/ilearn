@@ -7,7 +7,8 @@ import {
   segmentTranscript, 
   createUniformSegments 
 } from '@/lib/youtube/segmentation';
-import { generateMcq, McqGenerationError } from '@/ai/flows/generate-mcq';
+import {generateMcq} from '@/ai/flows/generate-mcq';
+import {McqGenerationError} from '@/ai/flows/internal/generate-mcq-flow';
 
 const toLoggableError = (error: unknown) =>
   error instanceof Error
