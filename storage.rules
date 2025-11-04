@@ -10,6 +10,11 @@ service firebase.storage {
       allow read: if isAdmin() || (request.auth != null && request.auth.uid == userId);
       allow write: if request.auth != null && request.auth.uid == userId;
     }
+
+    match /captions/{coachId}/{videoId}/{allPaths=**} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.token.coachId == coachId);
+      allow write: if isAdmin() || (request.auth != null && request.auth.token.coachId == coachId);
+    }
   }
 }
 
