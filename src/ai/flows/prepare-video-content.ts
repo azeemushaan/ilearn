@@ -8,7 +8,7 @@
  * - PrepareVideoContentOutput - The return type for the prepareVideoContent function.
  */
 
-import {ai, aiModelName, aiRuntimeConfig} from '@/ai/genkit';
+import {getAiEngine, type AiEngine} from '@/ai/genkit';
 import {z} from 'genkit';
 
 const PrepareVideoContentInputSchema = z.object({
@@ -35,58 +35,89 @@ const PrepareVideoContentOutputSchema = z.object({
 });
 export type PrepareVideoContentOutput = z.infer<typeof PrepareVideoContentOutputSchema>;
 
-export async function prepareVideoContent(input: PrepareVideoContentInput): Promise<PrepareVideoContentOutput> {
-  return prepareVideoContentFlow(input);
+type GenkitInstance = AiEngine['instance'];
+
+const generateMcqsPromptCache = new WeakMap<
+  GenkitInstance,
+  ReturnType<GenkitInstance['definePrompt']>
+>();
+const prepareVideoFlowCache = new WeakMap<
+  GenkitInstance,
+  ReturnType<GenkitInstance['defineFlow']>
+>();
+
+function getGenerateMcqsPrompt(engine: AiEngine) {
+  let prompt = generateMcqsPromptCache.get(engine.instance);
+  if (!prompt) {
+    prompt = engine.instance.definePrompt({
+      name: 'generateMcqsPrompt',
+      input: {schema: PrepareVideoContentInputSchema},
+      output: {schema: PrepareVideoContentOutputSchema},
+      prompt: `You are an AI assistant that generates multiple-choice questions (MCQs) based on video transcripts.
+
+      Given a transcript chunk, video title, chapter name, grade band, and locale, generate 1-3 MCQs in JSON format.
+
+      Output JSON schema: { stem, options[4], correctIndex, rationale, tags[], difficulty }
+
+      - Ground the correct answer by quoting the sentence/lines from the transcript chunk that justify it.
+      - Disallow personal data.
+      - Maintain a neutral tone.
+      - Ensure the content is child-safe.
+      - Avoid controversial topics unless educationally relevant and teacher-approved.
+
+      Here's the transcript chunk:
+      {{transcriptChunk}}
+
+      Video Title: {{title}}
+      Grade Band: {{gradeBand}}
+      Locale: {{locale}}
+
+      Generate one MCQ based on the above information.
+      `,
+      config: {
+        model: engine.modelName,
+        ...engine.runtimeConfig,
+        safetySettings: [
+          {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH'},
+          {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_LOW_AND_ABOVE'},
+          {category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE'},
+          {category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH'},
+        ],
+      },
+    });
+    generateMcqsPromptCache.set(engine.instance, prompt);
+  }
+  return prompt;
 }
 
-const generateMcqsPrompt = ai.definePrompt({
-  name: 'generateMcqsPrompt',
-  input: {schema: PrepareVideoContentInputSchema},
-  output: {schema: PrepareVideoContentOutputSchema},
-  prompt: `You are an AI assistant that generates multiple-choice questions (MCQs) based on video transcripts.
+function getPrepareVideoContentFlow(engine: AiEngine) {
+  let flow = prepareVideoFlowCache.get(engine.instance);
+  if (!flow) {
+    const prompt = getGenerateMcqsPrompt(engine);
+    flow = engine.instance.defineFlow(
+      {
+        name: 'prepareVideoContentFlow',
+        inputSchema: PrepareVideoContentInputSchema,
+        outputSchema: PrepareVideoContentOutputSchema,
+      },
+      async input => {
+        const {output} = await prompt(input);
+        if (!output) {
+          throw new Error('Genkit returned an empty response for prepareVideoContent');
+        }
 
-  Given a transcript chunk, video title, chapter name, grade band, and locale, generate 1-3 MCQs in JSON format.
-
-  Output JSON schema: { stem, options[4], correctIndex, rationale, tags[], difficulty }
-
-  - Ground the correct answer by quoting the sentence/lines from the transcript chunk that justify it.
-  - Disallow personal data.
-  - Maintain a neutral tone.
-  - Ensure the content is child-safe.
-  - Avoid controversial topics unless educationally relevant and teacher-approved.
-
-  Here's the transcript chunk:
-  {{transcriptChunk}}
-
-  Video Title: {{title}}
-  Grade Band: {{gradeBand}}
-  Locale: {{locale}}
-
-  Generate one MCQ based on the above information.
-  `,
-  config: {
-    model: aiModelName,
-    ...aiRuntimeConfig,
-    safetySettings: [
-      {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH'},
-      {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_LOW_AND_ABOVE'},
-      {category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE'},
-      {category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH'},
-    ],
-  },
-});
-
-const prepareVideoContentFlow = ai.defineFlow(
-  {
-    name: 'prepareVideoContentFlow',
-    inputSchema: PrepareVideoContentInputSchema,
-    outputSchema: PrepareVideoContentOutputSchema,
-  },
-  async input => {
-    const {output} = await generateMcqsPrompt(input);
-    // Add one short, one-sentence summary of what you have generated to the 'progress' field in the output.
-    output!.progress = 'Generated MCQ from transcript chunk.';
-
-    return output!;
+        output.progress = 'Generated MCQ from transcript chunk.';
+        return output;
+      }
+    );
+    prepareVideoFlowCache.set(engine.instance, flow);
   }
-);
+
+  return flow;
+}
+
+export async function prepareVideoContent(input: PrepareVideoContentInput): Promise<PrepareVideoContentOutput> {
+  const engine = await getAiEngine();
+  const flow = getPrepareVideoContentFlow(engine);
+  return flow(input);
+}

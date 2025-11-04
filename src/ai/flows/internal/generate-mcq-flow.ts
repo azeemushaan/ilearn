@@ -6,11 +6,10 @@
  * - GenerateMcqOutput - The return type for the generateMcq function.
  */
 
-import {ai, aiModelName, aiRuntimeConfig} from '@/ai/genkit';
+import {getAiEngine, type AiEngine} from '@/ai/genkit';
 import {z} from 'genkit';
 import {
   getActivePromptTemplate,
-  getSystemAiSettings,
   recordPromptUsage,
   type SystemAiSettings,
 } from '@/lib/firestore/admin-ops';
@@ -39,6 +38,17 @@ type PromptContext = {
   model: string;
 };
 
+type GenkitInstance = AiEngine['instance'];
+
+const generateMcqPromptCache = new WeakMap<
+  GenkitInstance,
+  ReturnType<GenkitInstance['definePrompt']>
+>();
+const generateMcqFlowCache = new WeakMap<
+  GenkitInstance,
+  ReturnType<GenkitInstance['defineFlow']>
+>();
+
 export const GenerateMcqOutputSchema = z.object({
   questions: z.array(
     z.object({
@@ -66,7 +76,9 @@ export class McqGenerationError extends Error {
 
 export async function generateMcq(input: GenerateMcqInput): Promise<GenerateMcqOutput> {
   try {
-    return await generateMcqFlow(input);
+    const engine = await getAiEngine();
+    const flow = getGenerateMcqFlow(engine);
+    return await flow(input);
   } catch (error) {
     const segmentId =
       input.videoId ??
@@ -134,19 +146,46 @@ Please generate the MCQs in the following JSON format:
 Make sure the correct answer is grounded in the transcript chunk.
 Disallow personal data; maintain a neutral tone; ensure child-safety; ban controversial topics unless educational & teacher-approved.`;
 
-async function resolvePromptContext(): Promise<PromptContext> {
-  const aiSettings = await getSystemAiSettings();
-  const activePrompt = await getActivePromptTemplate(aiSettings);
+function mapProviderForTelemetry(provider: string): SystemAiSettings['provider'] {
+  const normalized = provider.toLowerCase();
+  if (normalized === 'openai' || normalized === 'openrouter') {
+    return 'openai';
+  }
+  if (normalized === 'anthropic') {
+    return 'anthropic';
+  }
+  return 'google';
+}
+
+async function resolvePromptContext(engine: AiEngine): Promise<PromptContext> {
+  const syntheticSettings: SystemAiSettings = {
+    provider: mapProviderForTelemetry(engine.settings.provider),
+    model: engine.settings.model,
+    activePromptId: engine.settings.activePromptId,
+    apiKeyMask: null,
+    hasApiKey: Boolean(engine.settings.apiKeySecret),
+  };
+
+  const activePrompt = await getActivePromptTemplate(syntheticSettings);
   const content = activePrompt?.content ?? '';
   const trimmed = content.trim();
   const usedFallback = trimmed.length === 0;
+  const promptId = activePrompt?.id ?? engine.settings.activePromptId ?? null;
+  const template = usedFallback ? DEFAULT_MCQ_PROMPT_TEMPLATE : content;
+
+  console.info('ai.prompt.context', {
+    provider: engine.settings.provider,
+    model: engine.settings.model,
+    promptId,
+    usedFallback,
+  });
 
   return {
-    template: usedFallback ? DEFAULT_MCQ_PROMPT_TEMPLATE : content,
-    promptId: activePrompt?.id ?? aiSettings.activePromptId ?? null,
+    template,
+    promptId,
     usedFallback,
-    provider: aiSettings.provider,
-    model: aiSettings.model,
+    provider: syntheticSettings.provider,
+    model: engine.settings.model,
   };
 }
 
@@ -163,146 +202,162 @@ async function safeRecordPromptUsage(event: PromptUsageEvent) {
   }
 }
 
-export const generateMcqPrompt = ai.definePrompt({
-  name: 'generateMcqPrompt',
-  input: {schema: GenerateMcqInputSchema},
-  output: {schema: GenerateMcqOutputSchema},
-  prompt: async (_input, options) => {
-    const template = (options?.context as { promptTemplate?: string } | undefined)?.promptTemplate;
-    if (typeof template === 'string' && template.trim().length > 0) {
-      return [{ text: template }];
-    }
-    return [{ text: DEFAULT_MCQ_PROMPT_TEMPLATE }];
-  },
-  config: {
-    model: aiModelName,
-    ...aiRuntimeConfig,
-    safetySettings: [
-      {
-        category: 'HARM_CATEGORY_HATE_SPEECH',
-        threshold: 'BLOCK_ONLY_HIGH',
+function getGenerateMcqPrompt(engine: AiEngine) {
+  let prompt = generateMcqPromptCache.get(engine.instance);
+  if (!prompt) {
+    prompt = engine.instance.definePrompt({
+      name: 'generateMcqPrompt',
+      input: {schema: GenerateMcqInputSchema},
+      output: {schema: GenerateMcqOutputSchema},
+      prompt: async (_input, options) => {
+        const template = (options?.context as { promptTemplate?: string } | undefined)?.promptTemplate;
+        if (typeof template === 'string' && template.trim().length > 0) {
+          return [{text: template}];
+        }
+        return [{text: DEFAULT_MCQ_PROMPT_TEMPLATE}];
       },
-      {
-        category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-        threshold: 'BLOCK_NONE',
+      config: {
+        model: engine.modelName,
+        ...engine.runtimeConfig,
+        safetySettings: [
+          {
+            category: 'HARM_CATEGORY_HATE_SPEECH',
+            threshold: 'BLOCK_ONLY_HIGH',
+          },
+          {
+            category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+            threshold: 'BLOCK_NONE',
+          },
+          {
+            category: 'HARM_CATEGORY_HARASSMENT',
+            threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+          },
+          {
+            category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+            threshold: 'BLOCK_LOW_AND_ABOVE',
+          },
+          {
+            category: 'HARM_CATEGORY_CIVIC_INTEGRITY',
+            threshold: 'BLOCK_ONLY_HIGH',
+          },
+        ],
       },
-      {
-        category: 'HARM_CATEGORY_HARASSMENT',
-        threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-      },
-      {
-        category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-        threshold: 'BLOCK_LOW_AND_ABOVE',
-      },
-      {
-        category: 'HARM_CATEGORY_CIVIC_INTEGRITY',
-        threshold: 'BLOCK_ONLY_HIGH',
-      },
-    ],
-  },
-});
-
-export const generateMcqFlow = ai.defineFlow(
-  {
-    name: 'generateMcqFlow',
-    inputSchema: GenerateMcqInputSchema,
-    outputSchema: GenerateMcqOutputSchema,
-  },
-  async input => {
-    const promptContext = await resolvePromptContext();
-    const segmentId =
-      input.videoId ??
-      [input.videoTitle, input.chapterName].filter(Boolean).join('#') ||
-      'unknown-segment';
-    try {
-      const {output} = await generateMcqPrompt(input, {
-        context: { promptTemplate: promptContext.template },
-      });
-
-      if (output && output.questions.length > 0) {
-        await safeRecordPromptUsage({
-          promptId: promptContext.promptId,
-          status: 'success',
-          videoTitle: input.videoTitle,
-          chapterName: input.chapterName,
-          difficulty: input.difficultyTarget,
-          locale: input.locale,
-          coachId: input.coachId,
-          videoId: input.videoId,
-          usedFallback: promptContext.usedFallback,
-          provider: promptContext.provider,
-          model: promptContext.model,
-        });
-        return output;
-      }
-
-      const noQuestionsError = new McqGenerationError(
-        'Genkit returned no MCQs for the provided video segment.',
-        {
-          videoTitle: input.videoTitle,
-          chapterName: input.chapterName,
-          difficultyTarget: input.difficultyTarget,
-          segmentId,
-          videoId: input.videoId,
-          coachId: input.coachId,
-        },
-      );
-
-      console.error('generateMcqFlow.noQuestions', {
-        segmentId,
-        message: noQuestionsError.message,
-        metadata: noQuestionsError.metadata,
-      });
-
-      throw noQuestionsError;
-    } catch (error) {
-      await safeRecordPromptUsage({
-        promptId: promptContext.promptId,
-        status: 'error',
-        videoTitle: input.videoTitle,
-        chapterName: input.chapterName,
-        difficulty: input.difficultyTarget,
-        locale: input.locale,
-        coachId: input.coachId,
-        videoId: input.videoId,
-        usedFallback: promptContext.usedFallback,
-        provider: promptContext.provider,
-        model: promptContext.model,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-      if (error instanceof McqGenerationError) {
-        console.error('generateMcqFlow.emptyResponse', {
-          segmentId,
-          message: error.message,
-          metadata: error.metadata,
-        });
-        throw error;
-      }
-
-      const wrappedError = new McqGenerationError('MCQ generation failed', {
-        videoTitle: input.videoTitle,
-        chapterName: input.chapterName,
-        difficultyTarget: input.difficultyTarget,
-        segmentId,
-        videoId: input.videoId,
-        coachId: input.coachId,
-      });
-
-      if (typeof error === 'object' && error !== null) {
-        (wrappedError as Error & {cause?: unknown}).cause = error;
-      }
-
-      console.error('generateMcqFlow.error', {
-        segmentId,
-        message: wrappedError.message,
-        metadata: wrappedError.metadata,
-        cause:
-          error instanceof Error
-            ? { name: error.name, message: error.message, stack: error.stack }
-            : { message: String(error) },
-      });
-
-      throw wrappedError;
-    }
+    });
+    generateMcqPromptCache.set(engine.instance, prompt);
   }
-);
+  return prompt;
+}
+
+function getGenerateMcqFlow(engine: AiEngine) {
+  let flow = generateMcqFlowCache.get(engine.instance);
+  if (!flow) {
+    const prompt = getGenerateMcqPrompt(engine);
+    flow = engine.instance.defineFlow(
+      {
+        name: 'generateMcqFlow',
+        inputSchema: GenerateMcqInputSchema,
+        outputSchema: GenerateMcqOutputSchema,
+      },
+      async input => {
+        const promptContext = await resolvePromptContext(engine);
+        const segmentId =
+          input.videoId ??
+          [input.videoTitle, input.chapterName].filter(Boolean).join('#') ||
+          'unknown-segment';
+        try {
+          const {output} = await prompt(input, {
+            context: {promptTemplate: promptContext.template},
+          });
+
+          if (output && output.questions.length > 0) {
+            await safeRecordPromptUsage({
+              promptId: promptContext.promptId,
+              status: 'success',
+              videoTitle: input.videoTitle,
+              chapterName: input.chapterName,
+              difficulty: input.difficultyTarget,
+              locale: input.locale,
+              coachId: input.coachId,
+              videoId: input.videoId,
+              usedFallback: promptContext.usedFallback,
+              provider: promptContext.provider,
+              model: promptContext.model,
+            });
+            return output;
+          }
+
+          const noQuestionsError = new McqGenerationError(
+            'Genkit returned no MCQs for the provided video segment.',
+            {
+              videoTitle: input.videoTitle,
+              chapterName: input.chapterName,
+              difficultyTarget: input.difficultyTarget,
+              segmentId,
+              videoId: input.videoId,
+              coachId: input.coachId,
+            },
+          );
+
+          console.error('generateMcqFlow.noQuestions', {
+            segmentId,
+            message: noQuestionsError.message,
+            metadata: noQuestionsError.metadata,
+          });
+
+          throw noQuestionsError;
+        } catch (error) {
+          await safeRecordPromptUsage({
+            promptId: promptContext.promptId,
+            status: 'error',
+            videoTitle: input.videoTitle,
+            chapterName: input.chapterName,
+            difficulty: input.difficultyTarget,
+            locale: input.locale,
+            coachId: input.coachId,
+            videoId: input.videoId,
+            usedFallback: promptContext.usedFallback,
+            provider: promptContext.provider,
+            model: promptContext.model,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+          if (error instanceof McqGenerationError) {
+            console.error('generateMcqFlow.emptyResponse', {
+              segmentId,
+              message: error.message,
+              metadata: error.metadata,
+            });
+            throw error;
+          }
+
+          const wrappedError = new McqGenerationError('MCQ generation failed', {
+            videoTitle: input.videoTitle,
+            chapterName: input.chapterName,
+            difficultyTarget: input.difficultyTarget,
+            segmentId,
+            videoId: input.videoId,
+            coachId: input.coachId,
+          });
+
+          if (typeof error === 'object' && error !== null) {
+            (wrappedError as Error & {cause?: unknown}).cause = error;
+          }
+
+          console.error('generateMcqFlow.error', {
+            segmentId,
+            message: wrappedError.message,
+            metadata: wrappedError.metadata,
+            cause:
+              error instanceof Error
+                ? {name: error.name, message: error.message, stack: error.stack}
+                : {message: String(error)},
+          });
+
+          throw wrappedError;
+        }
+      },
+    );
+    generateMcqFlowCache.set(engine.instance, flow);
+  }
+
+  return flow;
+}
