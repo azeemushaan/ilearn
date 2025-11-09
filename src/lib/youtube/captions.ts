@@ -239,19 +239,91 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): 
 }
 
 const toText = async (payload: any): Promise<string> => {
+  console.log('[toText] Processing payload type:', typeof payload, 'constructor:', payload?.constructor?.name);
+
   if (!payload) return '';
+
+  // Handle string directly
   if (typeof payload === 'string') return payload;
+
+  // Handle Buffer
   if (payload instanceof Buffer) return payload.toString('utf8');
+
+  // Handle ArrayBuffer
   if (payload instanceof ArrayBuffer) return Buffer.from(payload).toString('utf8');
-  if (typeof payload.arrayBuffer === 'function') {
-    const buffer = await payload.arrayBuffer();
-    return Buffer.from(buffer).toString('utf8');
+
+  // Handle Blob-like objects (YouTube API returns this)
+  if (typeof payload === 'object') {
+    // Check for Blob or Blob-like objects
+    if (payload.constructor && payload.constructor.name === 'Blob') {
+      console.log('[toText] Detected Blob object');
+      if (typeof payload.text === 'function') {
+        return await payload.text();
+      }
+      if (typeof payload.arrayBuffer === 'function') {
+        const buffer = await payload.arrayBuffer();
+        return Buffer.from(buffer).toString('utf8');
+      }
+    }
+
+    // Check for direct buffer access
+    if (payload._buffer instanceof Buffer) {
+      console.log('[toText] Detected _buffer property');
+      return payload._buffer.toString('utf8');
+    }
+
+    // Check for Symbol buffer
+    if (typeof payload === 'object') {
+      const symbols = Object.getOwnPropertySymbols(payload);
+      for (const symbol of symbols) {
+        if (symbol.toString() === 'Symbol(buffer)') {
+          const buffer = (payload as any)[symbol];
+          if (buffer instanceof Buffer) {
+            console.log('[toText] Detected Symbol(buffer)');
+            return buffer.toString('utf8');
+          }
+        }
+      }
+    }
+
+    // Check for text method (Response-like objects)
+    if (typeof payload.text === 'function') {
+      console.log('[toText] Detected text() method');
+      return await payload.text();
+    }
+
+    // Check for arrayBuffer method
+    if (typeof payload.arrayBuffer === 'function') {
+      console.log('[toText] Detected arrayBuffer() method');
+      const buffer = await payload.arrayBuffer();
+      return Buffer.from(buffer).toString('utf8');
+    }
+
+    // Check for direct buffer property
+    if (payload.buffer instanceof ArrayBuffer) {
+      console.log('[toText] Detected buffer property');
+      return Buffer.from(payload.buffer).toString('utf8');
+    }
+
+    // Check for Uint8Array
+    if (payload instanceof Uint8Array) {
+      console.log('[toText] Detected Uint8Array');
+      return Buffer.from(payload).toString('utf8');
+    }
+
+    // Check for DataView
+    if (payload instanceof DataView) {
+      console.log('[toText] Detected DataView');
+      return Buffer.from(payload.buffer).toString('utf8');
+    }
   }
-  if (typeof payload.text === 'function') {
-    return payload.text();
+
+  // Last resort - try to convert to string, but log warning
+  console.warn('[toText] Unknown payload type, falling back to string conversion:', payload);
+  try {
+    return String(payload);
+  } catch (e) {
+    console.error('[toText] Failed to convert payload to string:', e);
+    return '';
   }
-  if (payload?.buffer) {
-    return Buffer.from(payload.buffer).toString('utf8');
-  }
-  return JSON.stringify(payload);
 };

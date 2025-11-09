@@ -359,6 +359,84 @@ const generateMcqPrompt = ai.definePrompt({
   config: generateMcqPromptConfig,
 });
 
+/**
+ * Robust MCQ Generation Rules:
+ * 1. Minimum transcript length: 100 characters
+ * 2. Must contain at least 3 complete sentences
+ * 3. Must not be generic introduction/filler content
+ * 4. Must have educational value and specific concepts
+ * 5. If rules fail, return empty questions array (no MCQs generated)
+ */
+
+function validateTranscriptForMcqGeneration(text: string, chapterName: string): { isValid: boolean; reason?: string } {
+  console.log('[MCQ Validation] Validating transcript for MCQ generation', {
+    textLength: text.length,
+    chapterName,
+    textPreview: text.substring(0, 150)
+  });
+
+  // Rule 1: Minimum length check (reduced for video segments)
+  if (text.length < 50) {
+    console.log('[MCQ Validation] ❌ Failed: Text too short', { length: text.length });
+    return { isValid: false, reason: 'Transcript too short for meaningful questions' };
+  }
+
+  // Rule 2: Sentence count check (reduced for video segments)
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
+  if (sentences.length < 2) {
+    console.log('[MCQ Validation] ❌ Failed: Insufficient sentences', { sentenceCount: sentences.length });
+    return { isValid: false, reason: 'Not enough complete sentences for question generation' };
+  }
+
+  // Rule 3: Check for generic/introductory content (less strict)
+  const lowerText = text.toLowerCase();
+  const genericPatterns = [
+    /^welcome|^hello|^hi/i,  // Basic greetings only
+    /subscribe.*like.*comment|follow.*channel/i,  // Social media calls
+    /thank you|thanks|appreciate.*support/i,  // Generic thanks
+  ];
+
+  const isGenericIntro = genericPatterns.some(pattern => pattern.test(lowerText));
+  if (isGenericIntro && text.length < 200 && sentences.length < 4) {
+    console.log('[MCQ Validation] ❌ Failed: Generic introductory content');
+    return { isValid: false, reason: 'Content appears to be generic introduction without educational substance' };
+  }
+
+  // Rule 4: Check for educational content indicators (more inclusive)
+  const educationalIndicators = [
+    /explain|understand|learn|concept|theory|method|technique|process|system/i,
+    /because|therefore|however|although|since|while|when|where|how|why/i,
+    /important|key|main|primary|essential|critical|vital/i,
+    /example|instance|case|demonstrate|show|illustrate/i,
+    /use|using|create|build|make|develop|code|program/i,  // Action verbs for tutorials
+    /step|guide|tutorial|instruction/i,  // Tutorial indicators
+  ];
+
+  const hasEducationalContent = educationalIndicators.some(pattern => pattern.test(lowerText));
+  if (!hasEducationalContent && text.length < 100) {
+    console.log('[MCQ Validation] ❌ Failed: No clear educational content detected');
+    return { isValid: false, reason: 'Content lacks clear educational concepts for question generation' };
+  }
+
+  // Rule 5: Check for specific, concrete content (more inclusive)
+  const concreteIndicators = [
+    /\d+|[0-9]/,  // Numbers
+    /[A-Z][a-z]+ [A-Z][a-z]+/,  // Proper nouns (potential concepts)
+    /function|method|class|variable|algorithm|data|structure|code|api|tool|software/i,  // Technical terms
+    /step|process|stage|phase|approach|strategy|file|folder|directory/i,  // Process-related terms
+    /cursor|claude|vibe|unlimited|github|npm|install/i,  // Specific tools mentioned
+  ];
+
+  const hasConcreteContent = concreteIndicators.some(pattern => pattern.test(text));
+  if (!hasConcreteContent && text.length < 200) {
+    console.log('[MCQ Validation] ❌ Failed: Content too abstract or general');
+    return { isValid: false, reason: 'Content is too abstract for generating specific, meaningful questions' };
+  }
+
+  console.log('[MCQ Validation] ✅ Passed all validation rules');
+  return { isValid: true };
+}
+
 const generateMcqFlow = ai.defineFlow(
   {
     name: 'generateMcqFlow',
@@ -366,14 +444,138 @@ const generateMcqFlow = ai.defineFlow(
     outputSchema: GenerateMcqOutputSchema,
   },
   async input => {
-    // For development, always use fallback to avoid API key issues
-    console.log('[MCQ] Using fallback question generation for development');
+    const startTime = Date.now();
+    console.log('[MCQ Generation] Starting AI-based MCQ generation', {
+      videoId: input.videoId,
+      videoTitle: input.videoTitle,
+      chapterName: input.chapterName,
+      difficulty: input.difficultyTarget,
+      transcriptLength: input.transcriptChunk.length
+    });
 
-    const fallback = buildFallbackQuestion(input);
+    // Step 1: Validate content for MCQ generation
+    const validation = validateTranscriptForMcqGeneration(input.transcriptChunk, input.chapterName);
+    if (!validation.isValid) {
+      console.log('[MCQ Generation] Validation failed - no MCQs will be generated', {
+        reason: validation.reason,
+        videoId: input.videoId,
+        chapterName: input.chapterName
+      });
 
-    return {
-      questions: [fallback],
-      progress: 'Used fallback question generation (development mode)'
-    };
+      return {
+        questions: [],
+        progress: `No MCQs generated: ${validation.reason}`
+      };
+    }
+
+    console.log('[MCQ Generation] Validation passed, proceeding with AI generation');
+
+    // Step 2: Generate MCQs using AI prompt
+    try {
+      const promptTemplate = await getActivePromptTemplate();
+      const {output} = await generateMcqPrompt(
+        {
+          transcriptChunk: input.transcriptChunk,
+          videoTitle: input.videoTitle,
+          chapterName: input.chapterName,
+          gradeBand: input.gradeBand,
+          locale: input.locale,
+          difficultyTarget: input.difficultyTarget,
+          coachId: input.coachId,
+          videoId: input.videoId,
+          transcriptHash: input.transcriptHash,
+        },
+        {
+          context: promptTemplate ? { promptTemplate: promptTemplate.content } : undefined,
+        }
+      );
+
+      console.log('[MCQ Generation] AI response received', {
+        hasQuestions: !!output?.questions,
+        questionCount: output?.questions?.length || 0,
+        hasProgress: !!output?.progress
+      });
+
+      // Step 3: Validate the structure
+      if (!output || !output.questions || !Array.isArray(output.questions)) {
+        console.error('[MCQ Generation] AI response missing questions array', { output });
+        throw new Error('AI response does not contain valid questions array');
+      }
+
+      if (output.questions.length === 0) {
+        console.log('[MCQ Generation] AI returned empty questions array');
+        return {
+          questions: [],
+          progress: 'AI determined no suitable questions could be generated for this content'
+        };
+      }
+
+      // Step 4: Validate each question
+      const validQuestions = output.questions.filter((q: any) => {
+        const isValid =
+          q &&
+          typeof q.stem === 'string' && q.stem.length > 10 &&
+          Array.isArray(q.options) && q.options.length === 4 &&
+          typeof q.correctIndex === 'number' && q.correctIndex >= 0 && q.correctIndex <= 3 &&
+          typeof q.rationale === 'string' && q.rationale.length > 10 &&
+          typeof q.difficulty === 'string' &&
+          Array.isArray(q.tags);
+
+        if (!isValid) {
+          console.log('[MCQ Generation] ❌ Invalid question filtered out', {
+            hasStem: !!q?.stem,
+            optionsLength: q?.options?.length,
+            correctIndex: q?.correctIndex,
+            hasRationale: !!q?.rationale,
+            hasDifficulty: !!q?.difficulty,
+            hasTags: Array.isArray(q?.tags)
+          });
+        }
+        return isValid;
+      });
+
+      console.log('[MCQ Generation] Question validation completed', {
+        originalCount: output.questions.length,
+        validCount: validQuestions.length
+      });
+
+      if (validQuestions.length === 0) {
+        console.log('[MCQ Generation] All generated questions failed validation');
+        return {
+          questions: [],
+          progress: 'Generated questions did not meet quality standards'
+        };
+      }
+
+      // Step 5: Filter duplicates (same question in same video)
+      // For now, return all valid questions (implement duplicate filtering later if needed)
+      const filteredQuestions = validQuestions;
+
+      const duration = Date.now() - startTime;
+
+      console.log('[MCQ Generation] ✅ Successfully completed', {
+        videoId: input.videoId,
+        chapterName: input.chapterName,
+        questionsGenerated: filteredQuestions.length,
+        duration
+      });
+
+      return {
+        questions: filteredQuestions,
+        progress: output.progress || `Successfully generated ${filteredQuestions.length} validated MCQs`
+      };
+
+    } catch (aiError) {
+      const duration = Date.now() - startTime;
+      console.error('[MCQ Generation] ❌ AI generation failed', {
+        error: aiError instanceof Error ? aiError.message : String(aiError),
+        videoId: input.videoId,
+        chapterName: input.chapterName,
+        duration
+      });
+
+      // Re-throw the error instead of using fallback
+      throw aiError;
+    }
   }
 );
