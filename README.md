@@ -1,145 +1,199 @@
-# iLearn (ER21) Admin & Billing Platform
+# iLearn LMS
 
-A production-ready Next.js 14 admin portal for iLearn ER21 with Firebase Auth, Firestore, Cloud Functions, and secure manual billing workflows.
+A modern, AI-powered Learning Management System with YouTube integration, intelligent video segmentation, and automated quiz generation.
 
-## Features
+## 🎯 Key Features
 
-- Next.js App Router with Tailwind + shadcn/ui.
-- Firebase Auth (email/password & Google) with role-based custom claims (`admin`, `teacher`, `student`).
-- Full admin dashboard for coaches, plans, subscriptions, manual payment approvals, invoices, users, audit trail, and system settings.
-- Coach self-service billing (manual bank slip uploads) and impersonation tooling for support teams.
-- Cloud Functions v2 automations for payment approval, subscription lifecycle, seat guardrails, invoice creation, and email receipt generation.
-- Hardened Firestore & Storage rules with tenant isolation and admin override.
-- Shared Zod schemas, typed Firestore converters, and comprehensive testing via Vitest.
-- Deployment ready Firebase configuration (hosting, functions, firestore rules/indexes, storage rules).
+- **Manual Video Processing** - Teacher-controlled workflow with explicit steps
+- **YouTube OAuth Integration** - One-time connect, ownership verification, auto caption fetch
+- **AI-Generated Quizzes** - Gemini-powered MCQs with segment-specific grounding
+- **Credit Management** - Transparent pricing for AI transcription (1 credit = 1 minute)
+- **Batch Processing** - Process multiple videos with concurrency control
+- **Real-Time Notifications** - Firestore listeners with tab-visibility awareness
+- **Admin Dashboards** - Processing queue, credit overview, system settings
+- **Role-Based Access** - Separate experiences for coaches, students, and admins
 
-## Prerequisites
+## 🚀 Quick Start
 
-- Node.js 20+
-- npm 10+
-- Firebase CLI (`npm install -g firebase-tools`)
-- A Firebase project with Firestore, Authentication, Cloud Storage, and Cloud Functions enabled.
-- Service account credentials (JSON) with Firestore/Storage access for local server actions (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PROJECT_ID`).
+### Prerequisites
+- Node.js 18+
+- Firebase project with Firestore and Storage
+- Google Cloud project with YouTube Data API v3 enabled
 
-## Environment Variables
+### Installation
 
-Create `.env.local` for Next.js and `.env` for Cloud Functions if needed.
-
-```
-NEXT_PUBLIC_FIREBASE_API_KEY=
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
-NEXT_PUBLIC_FIREBASE_APP_ID=
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-FIREBASE_CLIENT_EMAIL=service-account@project.iam.gserviceaccount.com
-FIREBASE_PROJECT_ID=your-project-id
-```
-
-For Cloud Functions secrets (e.g., support email) run:
-
-```
-firebase functions:secrets:set SUPPORT_EMAIL
-```
-
-## Development
-
-Install dependencies (the repository already contains a `node_modules` tree for the provided environment; re-install only if necessary).
-
-```
+```bash
+# 1. Install dependencies
 npm install
-```
 
-Run the Next.js dev server:
+# 2. Set up environment variables
+cp .env.example .env.local
+# Edit .env.local with your Firebase and YouTube OAuth credentials
 
-```
+# 3. Run migration (adds Phase 3 fields to existing data)
+npm run migrate:phase3
+
+# 4. Deploy Firestore indexes
+firebase deploy --only firestore:indexes
+
+# 5. Start development server
 npm run dev
 ```
 
-Run unit tests (Vitest):
+Server runs at: `http://localhost:9002`
 
+### YouTube OAuth Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Enable **YouTube Data API v3**
+3. Create **OAuth 2.0 Client ID** (Web application)
+4. Add redirect URI: `http://localhost:9002/api/youtube/auth/callback`
+5. Copy Client ID and Secret to `.env.local`
+
+## 📖 Documentation
+
+- **[Setup Guide](docs/QUICK_START.md)** - Detailed setup instructions
+- **[Phase 3 Manual Processing](docs/PHASE3_MANUAL_PROCESSING.md)** - Complete feature guide
+- **[Guidelines](docs/guidelines.md)** - System architecture and workflows
+- **[Blueprint](docs/blueprint.md)** - Feature specifications
+- **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)** - Development history
+- **[Audit Report](docs/AUDIT_REPORT.md)** - System audit and fixes
+
+## 🎓 User Workflows
+
+### For Teachers
+1. **Connect YouTube** (once) - Sidebar → YouTube Connection → Connect Account
+2. **Add Playlist** - Paste URL, system fetches metadata only
+3. **Process Videos** - Click Process → Choose source (OAuth/SRT/AI) → Select languages → Watch progress
+4. **Monitor** - Notification bell shows real-time updates
+
+### For Students
+1. **View Assignments** - See only ready videos
+2. **Watch Videos** - Click Start → Video plays → Quiz at segment boundaries
+3. **Get Notified** - Bell alerts when new videos are ready
+
+### For Admins
+1. **Monitor Queue** - `/admin/processing/queue` - View/cancel/prioritize jobs
+2. **Manage Credits** - `/admin/credits/overview` - View balances, add credits
+3. **Configure** - `/admin/processing/settings` - Toggle sources, set limits
+
+## 🏗️ Architecture
+
+### Tech Stack
+- **Frontend**: Next.js 15, React 18, TypeScript, Tailwind CSS, shadcn/ui
+- **Backend**: Firebase Admin SDK, Next.js API Routes
+- **Database**: Firestore
+- **Auth**: Firebase Authentication with custom claims
+- **Storage**: Firebase Cloud Storage
+- **AI**: Google Gemini 2.5 Flash, Google Speech-to-Text, Whisper
+- **Video**: YouTube iframe API with embedded player
+
+### Key Libraries
+- `googleapis` - YouTube Data API and Speech-to-Text
+- `genkit` - AI workflow orchestration
+- `zod` - Schema validation
+- `firebase-admin` - Server-side Firebase operations
+
+## 🔐 Security
+
+- Role-based access control (admin, coach, student)
+- Custom claims for multi-tenancy
+- Session cookies (HTTP-only, secure)
+- Firestore security rules with coach-scoped access
+- Storage rules for manifests and captions
+- Audit trail for all privileged actions
+
+## 📊 Status System
+
+- 🟡 **not_ready** - Metadata fetched, awaiting processing
+- 🔵 **processing** - Currently running a processing step
+- ✅ **ready** - Manifest built, playable by students
+- ❌ **failed** - Processing error (coaches only)
+
+Students see yellow/blue/green only. Coaches see all 4 with error details.
+
+## 💳 Credit System
+
+- **Pricing**: 1 credit = 1 minute video (minimum 2 credits for < 60s)
+- **Flow**: Reserve → Consume → Refund on failure
+- **Tracking**: All transactions logged in `credit_transactions`
+- **Admin**: Add credits via dashboard or API
+
+## 🔧 Development
+
+### Available Scripts
+
+```bash
+npm run dev          # Start development server (port 9002)
+npm run build        # Build for production
+npm run lint         # Run ESLint
+npm run typecheck    # TypeScript type checking
+npm run test         # Run tests
+
+# Database
+npm run seed         # Seed initial data
+npm run migrate:phase3  # Run Phase 3 migration
+
+# Admin
+npm run create-admin # Create admin user
 ```
-npm run test
-```
 
-### Firebase Emulators
-
-```
-firebase emulators:start
-```
-
-Configure the Firebase CLI with `.firebaserc` (`your-project-id`) before deployment.
-
-## Deployment
-
-1. Build the Next.js app:
-   ```
-   npm run build
-   ```
-2. Deploy Firestore rules & indexes:
-   ```
-   firebase deploy --only firestore:rules,firestore:indexes
-   ```
-3. Deploy Storage rules:
-   ```
-   firebase deploy --only storage:rules
-   ```
-4. Deploy Cloud Functions:
-   ```
-   cd functions && npm install && npm run deploy
-   ```
-5. Deploy Hosting (Next.js on Firebase Hosting with frameworks backend):
-   ```
-   firebase deploy --only hosting
-   ```
-
-## Testing Matrix
-
-- **Unit**: Vitest coverage for Zod schemas and admin operations (see `tests/`).
-- **Integration**: Exercises server actions for plans, payments, and subscriptions (`tests/integration`).
-- **E2E**: Playwright specs (see `tests/e2e`) verifying admin approving manual payments and verifying activated subscriptions.
-
-Run all tests:
-
-```
-npm run test
-```
-
-Playwright requires browsers; install once via `npx playwright install`.
-
-## Project Structure
+### Project Structure
 
 ```
 src/
-  app/admin/(dashboard)    # Admin routes with server actions and guards
-  components/admin         # Admin UI building blocks
-  lib/schemas              # Shared Zod schemas & typings
-  lib/firestore            # Firestore converters and admin operations
-  lib/firebase             # Admin SDK initialisation
-  hooks/                   # Client state hooks (impersonation, toasts)
-functions/
-  src/index.ts             # Cloud Functions (payment workflows, claims, invoices)
-firestore.rules            # Firestore security rules with admin override
-storage.rules              # Storage security rules
-firestore.indexes.json     # Composite indexes required by queries
-firebase.json              # Hosting + Functions deployment config
+├── app/              # Next.js App Router pages
+│   ├── api/          # API routes (22 endpoints)
+│   ├── dashboard/    # Teacher/student dashboards
+│   └── admin/        # Admin dashboards
+├── components/       # React components
+│   ├── ui/           # shadcn/ui components
+│   └── video/        # Video-specific components
+├── lib/              # Utility libraries
+│   ├── youtube/      # YouTube OAuth, captions, transcription
+│   ├── credits/      # Credit management
+│   ├── batch/        # Batch processing
+│   └── notifications/ # Notification system
+└── firebase/         # Firebase client setup
 ```
 
-## Service Accounts & Privileged Ops
+## 🐛 Troubleshooting
 
-Server actions and Cloud Functions require a service account with the following roles:
+### npm install fails
+- Check Node.js version (18+ required)
+- Try `npm install --legacy-peer-deps`
+- Clear cache: `rm -rf node_modules package-lock.json && npm install`
 
-- Cloud Datastore Owner (Firestore admin)
-- Cloud Functions Admin (deployment)
-- Storage Admin (receipt PDFs)
-- Firebase Auth Admin (custom claims)
+### OAuth not working
+- Verify redirect URI in Google Cloud Console matches exactly
+- Check credentials in `.env.local`
+- Ensure YouTube Data API v3 is enabled
 
-Generate a service account JSON and provide the values via environment variables as described earlier.
+### Videos show placeholder questions
+- Run migration: `npm run migrate:phase3`
+- Reprocess affected videos with real captions
+- Check processing logs for errors
 
-## Email Templates & PDFs
+### Firestore permission denied
+- Deploy security rules: `firebase deploy --only firestore:rules`
+- Check user has correct role claim
+- Verify coach ID is set correctly
 
-Cloud Functions use Handlebars templates (`functions/src/index.ts`) to generate receipt bodies. Extend them or plug into your transactional email provider by replacing the placeholder logic in `sendInvoiceEmail`.
+## 📝 License
 
-## Timezone
+Proprietary - iLearn LMS
 
-All server computations normalise to `Asia/Karachi` and the UI renders friendly timestamps with date-fns.
+## 🤝 Support
+
+For issues or questions:
+1. Check documentation in `docs/` folder
+2. Review Firebase Console logs
+3. Check processing logs via admin dashboard
+4. Contact support team
+
+---
+
+**Built with ❤️ for iLearn**
+
+Version: Phase 3 (Manual Processing System)
+Last Updated: November 2025

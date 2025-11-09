@@ -1,11 +1,16 @@
 import { getSystemAiSettings, getSystemSettings, listPromptTemplates } from '@/lib/firestore/admin-ops';
+export const dynamic = 'force-dynamic';
 import { updateSettingsAction, updateAiSettingsAction } from './actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ColorPickerInput } from '@/components/admin/color-picker-input';
 import Link from 'next/link';
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: { searchParams?: { saved?: string } | Promise<{ saved?: string }> }) {
+  const awaited = searchParams && typeof (searchParams as any).then === 'function'
+    ? await (searchParams as Promise<{ saved?: string }>)
+    : (searchParams as { saved?: string } | undefined);
   const [settings, aiSettings, promptTemplates] = await Promise.all([
     getSystemSettings(),
     getSystemAiSettings(),
@@ -16,9 +21,15 @@ export default async function SettingsPage() {
     { value: 'google', label: 'Google AI Studio' },
     { value: 'openai', label: 'OpenAI' },
     { value: 'anthropic', label: 'Anthropic Claude' },
+    { value: 'openrouter', label: 'OpenRouter' },
   ];
   return (
     <div className="space-y-6 p-6">
+      {awaited?.saved && (
+        <div className="rounded-md border border-green-200 bg-green-50 text-green-800 px-4 py-2">
+          Successfully saved {awaited.saved === 'ai' ? 'AI settings' : 'settings'}
+        </div>
+      )}
       <header className="space-y-1">
         <h1 className="text-3xl font-semibold">System settings</h1>
         <p className="text-muted-foreground">Toggle platform-wide flags and support details.</p>
@@ -39,7 +50,34 @@ export default async function SettingsPage() {
             </div>
             <div className="grid max-w-md gap-2">
               <label htmlFor="logoUrl" className="text-sm font-medium">Brand logo URL</label>
-              <Input id="logoUrl" name="logoUrl" defaultValue={settings.branding.logoUrl ?? ''} />
+              <Input id="logoUrl" name="logoUrl" defaultValue={settings.branding.logoUrl ?? ''} placeholder="https://example.com/logo.png" />
+              <p className="text-xs text-muted-foreground">Or upload a file below</p>
+            </div>
+            <div className="grid max-w-md gap-2">
+              <label htmlFor="logoFile" className="text-sm font-medium">Upload logo file</label>
+              <Input id="logoFile" name="logoFile" type="file" accept="image/*" />
+              {settings.branding.logoUrl && (
+                <div className="mt-2">
+                  <p className="text-xs text-muted-foreground mb-2">Current logo:</p>
+                  <img src={settings.branding.logoUrl} alt="Current logo" className="h-16 w-auto border rounded" />
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-4 max-w-md">
+              <ColorPickerInput
+                id="primaryColor"
+                name="primaryColor"
+                label="Primary color"
+                defaultValue={settings.branding.primaryColor || '#3b82f6'}
+                placeholder="#3b82f6"
+              />
+              <ColorPickerInput
+                id="secondaryColor"
+                name="secondaryColor"
+                label="Secondary color"
+                defaultValue={settings.branding.secondaryColor || '#10b981'}
+                placeholder="#10b981"
+              />
             </div>
             <Button type="submit">Save settings</Button>
           </form>

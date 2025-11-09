@@ -1,4 +1,5 @@
 import { SubscriptionsTable } from '@/components/admin/subscriptions-table';
+export const dynamic = 'force-dynamic';
 import { listCoaches, listPlans, listSubscriptions } from '@/lib/firestore/admin-ops';
 
 export default async function SubscriptionsPage() {

@@ -93,8 +93,30 @@ export async function getSystemSettings(): Promise<SystemSettings> {
 
 export async function updateSystemSettings(settings: Partial<SystemSettings>, actorId: string) {
   const parsed = systemSettingsUpdateSchema.parse(settings);
-  const payload = { ...parsed, updatedAt: nowTimestamp() };
-  await adminFirestore().collection('settings').doc('system').set(payload, { merge: true });
+  
+  // Remove undefined values to prevent Firestore errors
+  const cleanPayload = Object.entries({ ...parsed, updatedAt: nowTimestamp() }).reduce((acc, [key, value]) => {
+    if (value !== undefined) {
+      // Handle nested objects
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        const cleanNested = Object.entries(value).reduce((nestedAcc, [nestedKey, nestedValue]) => {
+          if (nestedValue !== undefined) {
+            nestedAcc[nestedKey] = nestedValue;
+          }
+          return nestedAcc;
+        }, {} as any);
+        
+        if (Object.keys(cleanNested).length > 0) {
+          acc[key] = cleanNested;
+        }
+      } else {
+        acc[key] = value;
+      }
+    }
+    return acc;
+  }, {} as any);
+  
+  await adminFirestore().collection('settings').doc('system').set(cleanPayload, { merge: true });
   await writeAudit({
     actorId,
     action: 'settings.update',
@@ -140,17 +162,23 @@ export async function getSystemAiSettings(): Promise<SystemAiSettings> {
     } satisfies SystemAiSettings;
   }
 
-  const data = aiSettingsSchema.partial().parse(doc.data() ?? {});
-  const provider = aiProviderValues.includes(data.provider as AiProvider)
-    ? (data.provider as AiProvider)
+  // Parse the main AI settings fields
+  const aiSettingsData = aiSettingsSchema._def.innerType.partial().parse(doc.data() ?? {});
+  
+  // Extract the specific fields we need
+  const provider = aiProviderValues.includes(aiSettingsData.provider as AiProvider)
+    ? (aiSettingsData.provider as AiProvider)
     : defaultAiSettings.provider;
-  const model = typeof data.model === 'string' && data.model.length > 0
-    ? data.model
+  const model = typeof aiSettingsData.model === 'string' && aiSettingsData.model.length > 0
+    ? aiSettingsData.model
     : defaultAiSettings.model;
-  const activePromptId = typeof data.activePromptId === 'string' && data.activePromptId.length > 0
-    ? data.activePromptId
+    
+  // Get the additional fields that are stored in the same document
+  const docData = doc.data() ?? {};
+  const activePromptId = typeof docData.activePromptId === 'string' && docData.activePromptId.length > 0
+    ? docData.activePromptId
     : null;
-  const apiKey = typeof data.apiKey === 'string' ? data.apiKey : null;
+  const apiKey = typeof docData.apiKey === 'string' ? docData.apiKey : null;
 
   return {
     provider,
@@ -431,23 +459,26 @@ type PromptUsageLog = {
 };
 
 export async function recordPromptUsage(event: PromptUsageLog) {
+  const meta: Record<string, unknown> = {
+    status: event.status,
+    videoTitle: event.videoTitle,
+    chapterName: event.chapterName,
+    difficulty: event.difficulty,
+    usedFallback: event.usedFallback,
+  };
+
+  if (event.locale !== undefined) meta.locale = event.locale;
+  if (event.videoId !== undefined) meta.videoId = event.videoId;
+  if (event.provider !== undefined) meta.provider = event.provider;
+  if (event.model !== undefined) meta.model = event.model;
+  if (event.errorMessage !== undefined) meta.errorMessage = event.errorMessage;
+
   await writeAudit({
     actorId: 'system',
     coachId: event.coachId ?? undefined,
     action: 'prompt.usage',
     target: { collection: 'prompts', id: event.promptId ?? 'default-template' },
-    meta: {
-      status: event.status,
-      videoTitle: event.videoTitle,
-      chapterName: event.chapterName,
-      difficulty: event.difficulty,
-      locale: event.locale,
-      videoId: event.videoId,
-      usedFallback: event.usedFallback,
-      provider: event.provider,
-      model: event.model,
-      errorMessage: event.errorMessage,
-    },
+    meta,
   });
 }
 

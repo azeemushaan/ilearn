@@ -23,16 +23,16 @@ const features = [
   },
 ];
 
-const WhyTeachersLoveIt = () => {
+const WhyCoachesLoveIt = () => {
   return (
     <section id="features" className="py-16 md:py-24 bg-secondary/30">
       <div className="container mx-auto px-4 md:px-6">
         <div className="max-w-3xl mx-auto text-center">
           <h2 className="text-3xl md:text-4xl font-headline font-bold text-primary">
-            Why Teachers Love iLearn
+            Why Coaches Love iLearn
           </h2>
           <p className="mt-4 text-lg text-muted-foreground">
-            Powerful tools designed to make your teaching more effective and engaging.
+            Powerful tools designed to make your coaching more effective and engaging.
           </p>
         </div>
         <div className="mt-12 grid gap-8 md:grid-cols-2 lg:grid-cols-4">
@@ -51,4 +51,4 @@ const WhyTeachersLoveIt = () => {
   );
 };
 
-export default WhyTeachersLoveIt;
+export default WhyCoachesLoveIt;

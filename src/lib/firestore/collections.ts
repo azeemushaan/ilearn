@@ -6,13 +6,13 @@ import {
   paymentSchema,
   planSchema,
   subscriptionSchema,
-  teacherSubscriptionSchema,
+  coachSubscriptionSchema,
   userSchema,
   type AuditEvent,
   type Coach,
   type CoachUser,
   type Invoice,
-  type LegacyTeacherSubscription,
+  type LegacycoachSubscription,
   type Payment,
   type Plan,
   type Subscription,
@@ -31,7 +31,7 @@ function createConverter<T extends { id?: string }>(schema: typeof paymentSchema
 function createConverter<T extends { id?: string }>(schema: typeof invoiceSchema): FirestoreDataConverter<T>;
 function createConverter<T extends { id?: string }>(schema: typeof auditSchema): FirestoreDataConverter<T>;
 function createConverter<T extends { id?: string }>(schema: typeof userSchema): FirestoreDataConverter<T>;
-function createConverter<T extends { id?: string }>(schema: typeof teacherSubscriptionSchema): FirestoreDataConverter<T>;
+function createConverter<T extends { id?: string }>(schema: typeof coachSubscriptionSchema): FirestoreDataConverter<T>;
 function createConverter<T extends { id?: string }>(schema: any): FirestoreDataConverter<T> {
   return {
     toFirestore(modelObject) {
@@ -57,7 +57,7 @@ export const converters = {
   payments: createConverter<Payment>(paymentSchema),
   invoices: createConverter<Invoice>(invoiceSchema),
   audit: createConverter<AuditEvent>(auditSchema),
-  teacherSubscriptions: createConverter<LegacyTeacherSubscription>(teacherSubscriptionSchema),
+  coachSubscriptions: createConverter<LegacycoachSubscription>(coachSubscriptionSchema),
 };
 
 export type FirestoreCollectionName = keyof typeof converters;
@@ -70,5 +70,5 @@ export const collectionNames: Record<FirestoreCollectionName, string> = {
   payments: 'payments',
   invoices: 'invoices',
   audit: 'audit',
-  teacherSubscriptions: 'teacher_subscriptions',
+  coachSubscriptions: 'coach_subscriptions',
 };

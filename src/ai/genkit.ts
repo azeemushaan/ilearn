@@ -17,26 +17,58 @@ type AiInitialization = {
 };
 
 const OPENAI_COMPATIBLE_PROVIDERS = new Set(['openrouter', 'openai']);
+const GOOGLE_PROVIDER_ALIASES = new Set(['google', 'googleai']);
 const OPENROUTER_DEFAULT_HEADERS = Object.freeze({
   'HTTP-Referer': 'https://ilearn.app',
   'X-Title': 'iLearn LMS',
 });
 
+function normalizeProvider(provider: string) {
+  const normalized = (provider || '').trim().toLowerCase();
+  if (GOOGLE_PROVIDER_ALIASES.has(normalized)) {
+    return 'googleai';
+  }
+  return normalized;
+}
+
 function isOpenAiCompatible(provider: string) {
   return OPENAI_COMPATIBLE_PROVIDERS.has(provider.toLowerCase());
 }
 
-async function fetchAiSettings(): Promise<AiSettings> {
+async function fetchAiSettings(): Promise<AiSettings & { apiKey?: string | null }> {
   try {
-    const doc = await adminFirestore().collection('settings').doc('system').get();
-    if (!doc.exists) {
-      return defaultAiSettings;
+    // Prefer granular AI settings document written by the Admin Settings page
+    const aiDoc = await adminFirestore().collection('settings').doc('system.ai').get();
+    let ai: any = { ...defaultAiSettings };
+    if (aiDoc.exists) {
+      const data = aiDoc.data() ?? {};
+      ai = {
+        ...defaultAiSettings,
+        provider: (data.provider as string) ?? defaultAiSettings.provider,
+        model: (data.model as string) ?? defaultAiSettings.model,
+        // Optional runtime overrides
+        runtime: (data.runtime as any) ?? defaultAiSettings.runtime,
+        requestHeaders: (data.requestHeaders as any) ?? defaultAiSettings.requestHeaders,
+        baseUrl: (data.baseUrl as string | undefined),
+        apiKey: (data.apiKey as string | undefined) ?? null,
+      };
+    } else {
+      // Back-compat: fallback to legacy system doc
+      const legacy = await adminFirestore().collection('settings').doc('system').get();
+      const settings = legacy.exists ? systemSettingsSchema.parse(legacy.data() ?? {}) : { ai: defaultAiSettings } as any;
+      ai = settings.ai ?? defaultAiSettings;
     }
-    const settings = systemSettingsSchema.parse(doc.data() ?? {});
-    return settings.ai ?? defaultAiSettings;
+    try {
+      console.log('[AI] Loaded settings:', {
+        provider: ai.provider,
+        model: ai.model,
+        apiKeyConfigured: Boolean(ai.apiKey),
+      });
+    } catch {}
+    return ai as AiSettings & { apiKey?: string | null };
   } catch (error) {
     console.warn('[AI] Falling back to default settings due to Firestore read error:', error);
-    return defaultAiSettings;
+    return { ...defaultAiSettings, apiKey: null } as any;
   }
 }
 
@@ -61,10 +93,11 @@ function coalesceBaseUrl(config: AiSettings) {
   if (config.baseUrl) {
     return config.baseUrl;
   }
-  if (config.provider.toLowerCase() === 'openrouter') {
+  const provider = (config.provider || '').toLowerCase();
+  if (provider === 'openrouter') {
     return 'https://openrouter.ai/api/v1';
   }
-  if (config.provider.toLowerCase() === 'openai') {
+  if (provider === 'openai') {
     return 'https://api.openai.com/v1';
   }
   return undefined;
@@ -233,8 +266,33 @@ async function initializeAi(): Promise<AiInitialization> {
   const config = await fetchAiSettings();
   const runtimeConfig = Object.freeze(buildPromptRuntimeConfig(config.runtime));
 
-  if (config.provider.toLowerCase() === 'googleai') {
-    const apiKey = config.apiKeySecret ? getServerSecret(config.apiKeySecret) : undefined;
+  const requestedProvider = config.provider ?? '';
+  const provider = normalizeProvider(requestedProvider);
+
+  if (provider === 'googleai') {
+    // Prefer explicit API key from settings; else allow secret indirection
+    const explicitKeyRaw = (config as any).apiKey as unknown;
+    const explicitKey = typeof explicitKeyRaw === 'string' && explicitKeyRaw.trim().length > 0
+      ? explicitKeyRaw.trim()
+      : undefined;
+    const secretNameRaw = (config as any).apiKeySecret as unknown;
+    const secretName = typeof secretNameRaw === 'string' && secretNameRaw.trim().length > 0
+      ? secretNameRaw.trim()
+      : undefined;
+    const apiKey = explicitKey ?? (secretName ? getServerSecret(secretName) : undefined);
+    // Normalize model id for Google provider, preserving explicit choices
+    const rawModel = (config.model || '').trim();
+    const finalModel = rawModel.startsWith('googleai/') ? rawModel : `googleai/${rawModel}`;
+    try {
+      console.log('[AI] Initializing GoogleAI provider', {
+        provider: requestedProvider,
+        model: finalModel,
+        hasApiKey: Boolean(apiKey),
+        keySource: explicitKey ? 'settings.apiKey' : (secretName ? `secret:${secretName}` : 'none'),
+        baseUrl: config.baseUrl ?? null,
+        apiKeyMask: apiKey ? `${apiKey.slice(0, 6)}…${apiKey.slice(-4)} (len=${apiKey.length})` : null,
+      });
+    } catch {}
     const plugins = [
       googleAI({
         apiKey,
@@ -244,17 +302,25 @@ async function initializeAi(): Promise<AiInitialization> {
 
     const instance = genkit({
       plugins,
-      model: config.model,
+      model: finalModel,
     });
 
-    return {instance, config, modelName: config.model, runtimeConfig};
+    return {instance, config, modelName: finalModel, runtimeConfig};
   }
 
-  if (isOpenAiCompatible(config.provider)) {
+  if (isOpenAiCompatible(provider)) {
     if (!config.apiKeySecret) {
       throw new Error('AI provider configuration requires an apiKeySecret value.');
     }
     const apiKey = getServerSecret(config.apiKeySecret);
+    try {
+      console.log('[AI] Initializing OpenAI-compatible provider', {
+        provider: requestedProvider,
+        model: config.model,
+        hasApiKey: Boolean(apiKey),
+        baseUrl: coalesceBaseUrl(config) ?? null,
+      });
+    } catch {}
     const instance = genkit({
       model: config.model,
     });
@@ -263,7 +329,7 @@ async function initializeAi(): Promise<AiInitialization> {
   }
 
   console.warn(
-    `[AI] Unknown provider "${config.provider}". Falling back to Google Gemini with default settings.`
+    `[AI] Unknown provider "${requestedProvider}". Falling back to Google Gemini with default settings.`
   );
 
   const fallbackInstance = genkit({

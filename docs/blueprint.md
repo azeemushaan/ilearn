@@ -2,13 +2,58 @@
 
 ## Core Features:
 
-- YouTube Playlist Assignment: Teachers can assign YouTube playlists to students, making educational content readily accessible. Functionality for the teacher to paste a playlist URL and for the backend to fetch video IDs + metadata using the YouTube Data API.
-- Intelligent Video Pauses: The player automatically pauses at concept boundaries, as determined by YouTube chapters or semantic segmentation. Segments transcript (or chapters) into ~60–120s chunks.
-- AI-Generated Quizzes: Leverage Gemini to automatically generate multiple-choice questions (MCQs) based on video transcripts and video metadata, complete with distractors and rationales. Generate MCQs in JSON with deterministic temperature:
-- Progress Tracking: Monitor student progress through assigned videos, tracking watch percentage, quiz scores, and completion status.
-- Teacher Dashboard: A dashboard for teachers to manage classes, playlists, assignments, and student progress.
-- Anti-Skip Controls: Implement measures to prevent students from skipping content, ensuring they engage with the material. Enforce watch-time thresholds and optional device binding for enhanced integrity. tool
-- Content Preparation Pipeline: The AI tool will be used to preprocess video content, fetching captions and trigger Gemini to store questions.
+- **Manual Video Processing Workflow**: Teachers have full control over video processing with explicit steps:
+  - Playlist ingestion fetches metadata only (no auto-processing)
+  - Per-video processing via dedicated buttons
+  - Four sequential steps: Fetch Captions → Segment Transcript → Generate MCQs → Build Manifest
+  - Each step has clear success/failure feedback with detailed logging
+
+- **YouTube OAuth Integration**: One-time OAuth connection per teacher:
+  - Multi-channel support (teachers can connect multiple YouTube accounts)
+  - Ownership verification with 24h caching to reduce API calls
+  - Batch ownership preflight for playlists
+  - Smart defaults based on ownership status
+
+- **Caption Source Management**: Three explicit caption sources with priority:
+  1. **OAuth** (YouTube-owned videos only): Automatic caption fetch with language selection
+  2. **SRT Upload**: Manual upload with validation (max 200MB, timestamp integrity, overlap detection)
+  3. **AI Transcription**: Credit-based transcription (Google Speech-to-Text or Whisper)
+
+- **Credit Management System**: Predictable, transparent credit system:
+  - 1 credit = 1 minute of video (minimum 2 credits for videos < 60 seconds)
+  - Reserve → Consume → Refund transaction flow
+  - Credit preview before AI transcription
+  - Automatic refund on processing failures
+  - Admin-configurable monthly allotments per plan
+
+- **Status Tracking & Visibility**: Four-state status system:
+  - `not_ready` (yellow): Metadata fetched, awaiting processing
+  - `processing` (blue): Currently running a processing step
+  - `ready` (green): Manifest built, playable by students
+  - `failed` (red): Processing error (visible to coaches only)
+  - Real-time status polling for progress updates
+
+- **Intelligent Video Pauses**: The player automatically pauses at segment boundaries (~60–120s chunks) determined by transcript-based semantic segmentation.
+
+- **AI-Generated Quizzes**: Gemini-powered MCQ generation with strict segment-based grounding:
+  - 1-3 questions per segment
+  - Questions must quote transcript text in rationale
+  - Rejects placeholder or insufficient content
+  - Configurable difficulty and language
+
+- **Cached Video Manifests**: Pre-generated JSON manifests in Cloud Storage containing all segment/question data, served via `/api/videos/[videoId]/manifest` endpoint to reduce Firestore reads.
+
+- **Secure Quiz Recording**: Server-side attempt validation via client-side Firestore writes with enrollment verification and automatic progress tracking.
+
+- **Progress Tracking**: Monitor student progress through assigned videos, tracking watch percentage, quiz scores, and completion status.
+
+- **Coach Dashboard**: Dashboard for teachers to manage playlists, assignments, video processing, and student progress with fine-grained control over each processing step.
+
+- **Anti-Skip Controls**: Prevent students from skipping content with playback position tracking and rewind on manual seeking.
+
+- **Comprehensive Logging**: Every processing step logged with actor, timestamp, credits, duration, and error details. Viewable per-video and per-batch.
+
+- **Hardened Security**: Enhanced Firestore and Storage rules preventing data enumeration, enforcing coach-scoped access, and requiring proper authentication.
 
 ## Style Guidelines:
 

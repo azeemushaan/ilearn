@@ -20,6 +20,8 @@ import {
   LogOut,
   CreditCard,
   Video,
+  Youtube,
+  ClipboardList,
 } from "lucide-react";
 import Logo from "@/components/logo";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -118,6 +120,14 @@ export default function DashboardLayout({
                 </SidebarMenuItem>
                 <SidebarMenuItem>
                   <SidebarMenuButton asChild>
+                    <Link href="/dashboard/youtube">
+                      <Youtube />
+                      <span>YouTube Connection</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
                     <Link href="/dashboard/manage-students">
                       <Users />
                       <span>Students</span>
@@ -137,6 +147,14 @@ export default function DashboardLayout({
                     <Link href="/dashboard/subscription">
                       <CreditCard />
                       <span>Subscription</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href="/dashboard/coach/assignments">
+                      <ClipboardList />
+                      <span>Assignments</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

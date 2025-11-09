@@ -6,7 +6,7 @@ import { adminFirestore, adminStorage } from '@/lib/firebase/admin';
 import { paymentSchema } from '@/lib/schemas';
 
 export async function submitManualPayment(formData: FormData) {
-  const user = await requireRole(['admin', 'teacher']);
+  const user = await requireRole(['admin', 'coach']);
   if (!user.coachId) {
     throw new Error('Coach context missing');
   }

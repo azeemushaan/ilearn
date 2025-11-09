@@ -5,17 +5,20 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth } from '@/firebase';
-import { collection, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
-import { PlusCircle, Video, Loader2 } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { collection, query, where, addDoc, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
+import { PlusCircle, Video, Loader2, Trash2 } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
 
 export default function PlaylistsPage() {
   const firestore = useFirestore();
   const { claims } = useFirebaseAuth();
+  const { toast } = useToast();
   const [playlistUrl, setPlaylistUrl] = useState('');
   const [pending, startTransition] = useTransition();
+  const [deletingPlaylistId, setDeletingPlaylistId] = useState<string | null>(null);
 
   const playlistsRef = useMemoFirebase(() => {
     if (!firestore || !claims?.coachId) return null;
@@ -70,48 +73,8 @@ export default function PlaylistsPage() {
         if (response.ok) {
           toast({ 
             title: 'Success!', 
-            description: `Playlist added with ${result.videosCreated} videos. Now processing videos...` 
+            description: `Playlist added with ${result.videosCreated} videos. Go to Assignment to process videos.` 
           });
-
-          // Trigger video preprocessing for all videos
-          if (result.videoRefs && result.videoRefs.length > 0) {
-            const preparationResults = await Promise.allSettled(
-              result.videoRefs.map(async (videoRef: string) => {
-                const preparationResponse = await fetch(`/api/videos/${videoRef}/prepare`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ forceReprocess: false }),
-                });
-
-                const payload = await preparationResponse.clone().json().catch(() => null);
-
-                if (!preparationResponse.ok) {
-                  const message = payload?.error || payload?.errorMessage || payload?.message || 'Failed to prepare video';
-                  const error = new Error(`[${videoRef}] ${message}`);
-                  console.error('Error processing video:', error);
-                  throw error;
-                }
-
-                return payload;
-              })
-            );
-
-            const failureMessages = preparationResults.reduce<string[]>((messages, result) => {
-              if (result.status === 'rejected') {
-                const reason = result.reason;
-                messages.push(reason instanceof Error ? reason.message : String(reason));
-              }
-              return messages;
-            }, []);
-
-            if (failureMessages.length > 0) {
-              toast({
-                title: 'Video processing failed',
-                description: failureMessages.join('\n'),
-                variant: 'destructive',
-              });
-            }
-          }
         } else {
           toast({ 
             title: 'Error', 
@@ -123,6 +86,30 @@ export default function PlaylistsPage() {
         toast({ title: 'Error', description: (error as Error).message, variant: 'destructive' });
       }
     });
+  };
+
+  const handleDeletePlaylist = async (playlistId: string) => {
+    if (!confirm('Are you sure you want to delete this playlist? This action cannot be undone.')) {
+      return;
+    }
+
+    setDeletingPlaylistId(playlistId);
+    try {
+      const playlistRef = doc(firestore!, 'playlists', playlistId);
+      await deleteDoc(playlistRef);
+      toast({
+        title: 'Success',
+        description: 'Playlist deleted successfully',
+      });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to delete playlist',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingPlaylistId(null);
+    }
   };
 
   return (
@@ -167,11 +154,21 @@ export default function PlaylistsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Button asChild variant="outline" size="sm" className="w-full">
-                  <Link href={`/dashboard/playlists/${playlist.id}/assign`}>
-                    Assign to Students
-                  </Link>
-                </Button>
+                <div className="flex gap-2">
+                  <Button asChild variant="outline" size="sm" className="flex-1">
+                    <Link href={`/dashboard/playlists/${playlist.id}/assign`}>
+                      Assign to Students
+                    </Link>
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => handleDeletePlaylist(playlist.id)}
+                    disabled={deletingPlaylistId === playlist.id}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}

@@ -4,21 +4,78 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { 
   parseSRT, 
   parseVTT, 
-  segmentTranscript, 
-  createUniformSegments 
+  segmentTranscript 
 } from '@/lib/youtube/segmentation';
-import { generateMcq, McqGenerationError } from '@/ai/flows/generate-mcq';
+import { generateMcq } from '@/ai/flows/generate-mcq';
+import { McqGenerationError } from '@/ai/flows/mcq-errors';
+import { videoManifestSchema, type VideoManifest } from '@/lib/schemas';
 
 const toLoggableError = (error: unknown) =>
   error instanceof Error
     ? { name: error.name, message: error.message, stack: error.stack }
     : { message: String(error) };
 
+async function buildManifest(videoId: string, videoData: any): Promise<VideoManifest> {
+  const db = adminFirestore();
+  
+  // Fetch all segments
+  const segmentsSnapshot = await db
+    .collection(`videos/${videoId}/segments`)
+    .orderBy('tStartSec')
+    .get();
+  
+  const segments = [];
+  let totalQuestions = 0;
+  
+  for (const segmentDoc of segmentsSnapshot.docs) {
+    const segmentData = segmentDoc.data();
+    
+    // Fetch questions for this segment
+    const questionsSnapshot = await db
+      .collection(`videos/${videoId}/segments/${segmentDoc.id}/questions`)
+      .get();
+    
+    const questionIds = questionsSnapshot.docs.map(q => q.id);
+    totalQuestions += questionIds.length;
+    
+    segments.push({
+      segmentId: segmentDoc.id,
+      segmentIndex: segmentData.segmentIndex,
+      tStartSec: segmentData.tStartSec,
+      tEndSec: segmentData.tEndSec,
+      durationSec: segmentData.tEndSec - segmentData.tStartSec,
+      questionIds,
+      difficulty: segmentData.difficulty,
+    });
+  }
+  
+  const manifest = {
+    videoId,
+    youtubeVideoId: videoData.youtubeVideoId,
+    title: videoData.title,
+    duration: videoData.duration,
+    status: videoData.status,
+    hasCaptions: videoData.hasCaptions || false,
+    chaptersOnly: videoData.chaptersOnly || false,
+    segments,
+    totalSegments: segments.length,
+    totalQuestions,
+    generatedAt: new Date().toISOString(),
+    version: '1.0',
+  };
+  
+  // Validate with Zod
+  return videoManifestSchema.parse(manifest);
+}
+
 export async function POST(
   request: NextRequest,
-  { params }: { params: { videoId: string } }
+  ctx: { params: { videoId: string } | Promise<{ videoId: string }> }
 ) {
-  const { videoId } = params;
+  const awaitedParams = (ctx.params && typeof (ctx.params as any).then === 'function')
+    ? await (ctx.params as Promise<{ videoId: string }>)
+    : (ctx.params as { videoId: string });
+  const { videoId } = awaitedParams;
 
   try {
     const body = await request.json();
@@ -67,6 +124,8 @@ export async function POST(
       updatedAt: Timestamp.now(),
     });
 
+    let lastSegmentContext: { index: number; difficulty: string } | null = null;
+
     try {
       const segmentsCollection = db.collection(`videos/${videoId}/segments`);
       const existingSegments = await segmentsCollection.get();
@@ -83,32 +142,31 @@ export async function POST(
 
       let segments;
 
-      // Strategy 1: Use provided captions
-      if (captionContent) {
-        const cues = captionFormat === 'vtt' 
-          ? parseVTT(captionContent)
-          : parseSRT(captionContent);
-
-        segments = segmentTranscript(cues, {
-          minDuration: 30,
-          maxDuration: 60,
-          preferredDuration: 45,
-        });
-
-        await videoRef.update({
-          hasCaptions: true,
-          chaptersOnly: false,
-        });
-      } 
-      // Strategy 2: Fallback to uniform segments
-      else {
-        segments = createUniformSegments(videoData.duration, 45);
-        
-        await videoRef.update({
-          hasCaptions: false,
-          chaptersOnly: true, // Using uniform segments as fallback
-        });
+      // Caption content is required - no fallback allowed
+      if (!captionContent) {
+        return NextResponse.json(
+          { 
+            error: 'Caption content required',
+            message: 'Please fetch captions via OAuth, upload SRT, or use AI transcription before processing.'
+          },
+          { status: 400 }
+        );
       }
+
+      const cues = captionFormat === 'vtt' 
+        ? parseVTT(captionContent)
+        : parseSRT(captionContent);
+
+      segments = segmentTranscript(cues, {
+        minDuration: 30,
+        maxDuration: 60,
+        preferredDuration: 45,
+      });
+
+      await videoRef.update({
+        hasCaptions: true,
+        chaptersOnly: false,
+      });
 
       if (segments.length === 0) {
         throw new Error('No segments generated');
@@ -116,7 +174,6 @@ export async function POST(
 
       // Store segments and generate questions
       const segmentRefs: string[] = [];
-      let lastSegmentContext: { index: number; difficulty: string } | null = null;
 
       const summarize = (text: string) => {
         const normalized = text.trim();
@@ -144,6 +201,18 @@ export async function POST(
         const difficulty = i < segments.length / 3 ? 'easy' : i < (2 * segments.length) / 3 ? 'medium' : 'hard';
         lastSegmentContext = { index: i, difficulty };
 
+        try {
+          console.log('[prepareVideo] segment.start', {
+            videoId,
+            index: i,
+            difficulty,
+            tStartSec: segment.tStartSec,
+            tEndSec: segment.tEndSec,
+            textLen: (segment.textChunk || '').length,
+            textPreview: (segment.textChunk || '').slice(0, 120),
+          });
+        } catch {}
+
         let mcqResult: Awaited<ReturnType<typeof generateMcq>>;
         try {
           mcqResult = await generateMcq({
@@ -162,6 +231,14 @@ export async function POST(
         }
 
         const questions = Array.isArray(mcqResult?.questions) ? mcqResult!.questions : [];
+        try {
+          console.log('[prepareVideo] segment.mcqResult', {
+            index: i,
+            difficulty,
+            questionCount: questions.length,
+            firstStemPreview: questions[0]?.stem?.slice(0, 120),
+          });
+        } catch {}
 
         const segmentRef = db.collection(`videos/${videoId}/segments`).doc();
         const now = Timestamp.now();
@@ -224,6 +301,37 @@ export async function POST(
         updatedAt: Timestamp.now(),
       });
 
+      // Generate and cache manifest
+      try {
+        console.log(`[prepareVideo] Generating manifest for video ${videoId}`);
+        const manifestData = await buildManifest(videoId, {
+          ...videoData,
+          status: 'ready',
+          segmentCount: segments.length,
+        });
+        
+        const { adminStorage } = await import('@/lib/firebase/admin');
+        const bucket = adminStorage().bucket();
+        const manifestPath = `manifests/${videoId}.json`;
+        const file = bucket.file(manifestPath);
+        
+        await file.save(JSON.stringify(manifestData), {
+          metadata: {
+            contentType: 'application/json',
+            metadata: {
+              coachId: videoData.coachId || '',
+              videoId: videoId,
+              generatedAt: new Date().toISOString(),
+            }
+          }
+        });
+        
+        console.log(`[prepareVideo] Manifest cached successfully for video ${videoId}`);
+      } catch (manifestError) {
+        console.error('[prepareVideo] Failed to cache manifest:', manifestError);
+        // Non-fatal - manifest will be generated on-demand
+      }
+
       return NextResponse.json({
         success: true,
         message: 'Video processed successfully',
@@ -257,7 +365,7 @@ export async function POST(
     const status = error instanceof McqGenerationError ? 502 : 500;
 
     console.error('prepareVideoRoute.error', {
-      videoId: params.videoId,
+      videoId,
       error: toLoggableError(error),
       status,
     });

@@ -16,6 +16,7 @@ import {
   recordPromptUsage,
   type SystemAiSettings,
 } from '@/lib/firestore/admin-ops';
+import { McqGenerationError } from './mcq-errors';
 
 const GenerateMcqInputSchema = z.object({
   transcriptChunk: z
@@ -39,6 +40,8 @@ type PromptContext = {
   usedFallback: boolean;
   provider: SystemAiSettings['provider'];
   model: string;
+  hasApiKey: boolean;
+  apiKeyMask: string | null;
 };
 
 function buildFallbackQuestion(input: GenerateMcqInput) {
@@ -92,18 +95,20 @@ const GenerateMcqOutputSchema = z.object({
 });
 export type GenerateMcqOutput = z.infer<typeof GenerateMcqOutputSchema>;
 
-export class McqGenerationError extends Error {
-  public readonly metadata: Record<string, unknown>;
-
-  constructor(message: string, metadata: Record<string, unknown> = {}) {
-    super(message);
-    this.name = 'McqGenerationError';
-    this.metadata = metadata;
-  }
-}
-
 export async function generateMcq(input: GenerateMcqInput): Promise<GenerateMcqOutput> {
   try {
+    // Validate transcript chunk before processing
+    validateTranscriptChunk(input.transcriptChunk);
+    
+    try {
+      console.log('[MCQ] generateMcq.start', {
+        videoTitle: input.videoTitle,
+        chapterName: input.chapterName,
+        difficultyTarget: input.difficultyTarget,
+        transcriptLen: input.transcriptChunk?.length ?? 0,
+        transcriptPreview: (input.transcriptChunk || '').slice(0, 120),
+      });
+    } catch {}
     return await generateMcqFlow(input);
   } catch (error) {
     if (error instanceof McqGenerationError) {
@@ -133,36 +138,49 @@ export async function generateMcq(input: GenerateMcqInput): Promise<GenerateMcqO
   }
 }
 
-const DEFAULT_MCQ_PROMPT_TEMPLATE = `You are an AI assistant helping teachers generate multiple-choice questions (MCQs) from video transcripts and metadata.
+const DEFAULT_MCQ_PROMPT_TEMPLATE = `You are an AI assistant generating quiz questions for educational videos. The student watches videos divided into clear segments (60–120 seconds each). 
 
-Given a transcript chunk, video title, chapter name, grade band, locale, and target difficulty, your task is to generate 1-3 MCQs.
-Each MCQ should have a stem, four options, a correct index (0-3), a rationale, tags, and a difficulty level.
+**CRITICAL RULES:**
+1. **ONLY use information from the provided transcript chunk below** — DO NOT reference other segments, general knowledge, or unrelated topics
+2. If the transcript is too short, vague, or unrelated to the video title, return { "questions": [], "progress": "Insufficient context in segment" }
+3. Each question MUST cite a specific phrase from the transcript in the rationale
+4. Generate 1–3 unique MCQs that test understanding of THIS segment only
 
-Here are the details:
+**CONTEXT:**
 - Video Title: {{{videoTitle}}}
-- Chapter Name: {{{chapterName}}}
+- Segment: {{{chapterName}}}
 - Grade Band: {{{gradeBand}}}
-- Locale: {{{locale}}}
-- Difficulty Target: {{{difficultyTarget}}}
-- Transcript Chunk: {{{transcriptChunk}}}
+- Language: {{{locale}}}
+- Difficulty: {{{difficultyTarget}}}
 
-Please generate the MCQs in the following JSON format:
+**TRANSCRIPT (THIS SEGMENT ONLY):**
+"""
+{{{transcriptChunk}}}
+"""
+
+**REQUIRED OUTPUT FORMAT:**
 {
   "questions": [
     {
-      "stem": "...",
-      "options": ["...", "...", "...", "..."],
+      "stem": "Clear, specific question about the transcript above",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
       "correctIndex": 0,
-      "rationale": "...",
-      "tags": ["...", "..."],
-      "difficulty": "..."
+      "rationale": "Quote the exact phrase from transcript that supports this answer: '...'",
+      "tags": ["topic keyword"],
+      "difficulty": "easy" | "medium" | "hard"
     }
   ],
-  "progress": "Generated MCQs from the provided video transcript chunk."
+  "progress": "Generated N questions from segment transcript."
 }
 
-Make sure the correct answer is grounded in the transcript chunk.
-Disallow personal data; maintain a neutral tone; ensure child-safety; ban controversial topics unless educational & teacher-approved.`;
+**QUALITY CHECKS:**
+- ✅ Every answer is supported by a direct quote from the transcript
+- ✅ Question is about the SPECIFIC content in this segment
+- ✅ Avoids generic/recycled questions from other videos
+- ❌ Do NOT generate questions if transcript is empty or irrelevant
+- ❌ Do NOT use external knowledge or other video segments
+
+**SAFETY:** Maintain neutral tone, child-safe content, no personal data, avoid controversial topics unless educational.`;
 
 async function resolvePromptContext(): Promise<PromptContext> {
   const aiSettings = await getSystemAiSettings();
@@ -177,7 +195,36 @@ async function resolvePromptContext(): Promise<PromptContext> {
     usedFallback,
     provider: aiSettings.provider,
     model: aiSettings.model,
+    hasApiKey: aiSettings.hasApiKey,
+    apiKeyMask: aiSettings.apiKeyMask,
   };
+}
+
+/**
+ * Validate transcript chunk before MCQ generation
+ * Rejects placeholder text and insufficient content
+ */
+function validateTranscriptChunk(transcriptChunk: string): void {
+  // Check for minimum content length
+  if (transcriptChunk.length < 50) {
+    throw new Error('Invalid transcript: insufficient content (minimum 50 characters required)');
+  }
+
+  // Check for placeholder text pattern (e.g., "Segment at 3:45 - 4:30")
+  const placeholderPattern = /^Segment at \d+:\d+ - \d+:\d+$/i;
+  if (placeholderPattern.test(transcriptChunk.trim())) {
+    throw new Error('Invalid transcript: placeholder text detected. Please provide actual caption content.');
+  }
+
+  // Check if content is just timestamps or minimal text
+  const meaningfulWords = transcriptChunk
+    .replace(/\d+:\d+/g, '') // Remove timestamps
+    .split(/\s+/)
+    .filter(word => word.length > 2);
+  
+  if (meaningfulWords.length < 10) {
+    throw new Error('Invalid transcript: insufficient meaningful content');
+  }
 }
 
 async function safeRecordPromptUsage(event: PromptUsageEvent) {
@@ -193,6 +240,36 @@ async function safeRecordPromptUsage(event: PromptUsageEvent) {
   }
 }
 
+const generateMcqPromptConfig: Record<string, unknown> = {
+  ...aiRuntimeConfig,
+  safetySettings: [
+    {
+      category: 'HARM_CATEGORY_HATE_SPEECH',
+      threshold: 'BLOCK_ONLY_HIGH',
+    },
+    {
+      category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+      threshold: 'BLOCK_NONE',
+    },
+    {
+      category: 'HARM_CATEGORY_HARASSMENT',
+      threshold: 'BLOCK_MEDIUM_AND_ABOVE',
+    },
+    {
+      category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+      threshold: 'BLOCK_LOW_AND_ABOVE',
+    },
+    {
+      category: 'HARM_CATEGORY_CIVIC_INTEGRITY',
+      threshold: 'BLOCK_ONLY_HIGH',
+    },
+  ],
+};
+
+if (!aiModelName.startsWith('googleai/')) {
+  generateMcqPromptConfig.model = aiModelName;
+}
+
 const generateMcqPrompt = ai.definePrompt({
   name: 'generateMcqPrompt',
   input: {schema: GenerateMcqInputSchema},
@@ -204,32 +281,7 @@ const generateMcqPrompt = ai.definePrompt({
     }
     return [{ text: DEFAULT_MCQ_PROMPT_TEMPLATE }];
   },
-  config: {
-    model: aiModelName,
-    ...aiRuntimeConfig,
-    safetySettings: [
-      {
-        category: 'HARM_CATEGORY_HATE_SPEECH',
-        threshold: 'BLOCK_ONLY_HIGH',
-      },
-      {
-        category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-        threshold: 'BLOCK_NONE',
-      },
-      {
-        category: 'HARM_CATEGORY_HARASSMENT',
-        threshold: 'BLOCK_MEDIUM_AND_ABOVE',
-      },
-      {
-        category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-        threshold: 'BLOCK_LOW_AND_ABOVE',
-      },
-      {
-        category: 'HARM_CATEGORY_CIVIC_INTEGRITY',
-        threshold: 'BLOCK_ONLY_HIGH',
-      },
-    ],
-  },
+  config: generateMcqPromptConfig,
 });
 
 const generateMcqFlow = ai.defineFlow(
@@ -241,11 +293,29 @@ const generateMcqFlow = ai.defineFlow(
   async input => {
     const promptContext = await resolvePromptContext();
     try {
+      try {
+        console.log('[MCQ] promptContext', {
+          provider: promptContext.provider,
+          model: promptContext.model,
+          usedFallbackTemplate: promptContext.usedFallback,
+          runtimeConfig: generateMcqPromptConfig,
+          effectiveModel: generateMcqPromptConfig.model ?? aiModelName,
+          hasApiKeyConfigured: promptContext.hasApiKey,
+          apiKeyMask: promptContext.apiKeyMask,
+          promptTemplateSource: promptContext.promptId ?? (promptContext.usedFallback ? 'fallback' : 'unknown'),
+        });
+      } catch {}
       const {output} = await generateMcqPrompt(input, {
         context: { promptTemplate: promptContext.template },
       });
 
       if (output && output.questions.length > 0) {
+        try {
+          console.log('[MCQ] generation.success', {
+            count: output.questions.length,
+            firstStemPreview: output.questions[0]?.stem?.slice(0, 120),
+          });
+        } catch {}
         await safeRecordPromptUsage({
           promptId: promptContext.promptId,
           status: 'success',
@@ -261,13 +331,32 @@ const generateMcqFlow = ai.defineFlow(
         });
         return output;
       }
-
-      throw new McqGenerationError('MCQ generation returned no questions', {
+      // Fallback: synthesize a basic question when the model returns none (e.g., no captions)
+      const fallback = buildFallbackQuestion(input);
+      console.warn('[MCQ] generation.empty_output_using_fallback');
+      await safeRecordPromptUsage({
+        promptId: promptContext.promptId,
+        status: 'success',
         videoTitle: input.videoTitle,
         chapterName: input.chapterName,
-        difficultyTarget: input.difficultyTarget,
+        difficulty: input.difficultyTarget,
+        locale: input.locale,
+        coachId: input.coachId,
+        videoId: input.videoId,
+        usedFallback: true,
+        provider: promptContext.provider,
+        model: promptContext.model,
       });
+      return { questions: [fallback], progress: 'Used fallback due to empty model output.' };
     } catch (error) {
+      try {
+        console.error('generateMcqFlow.stepError', {
+          message: error instanceof Error ? error.message : String(error),
+          videoTitle: input.videoTitle,
+          chapterName: input.chapterName,
+          difficultyTarget: input.difficultyTarget,
+        });
+      } catch {}
       await safeRecordPromptUsage({
         promptId: promptContext.promptId,
         status: 'error',
@@ -287,7 +376,12 @@ const generateMcqFlow = ai.defineFlow(
           message: error.message,
           metadata: error.metadata,
         });
-        throw error;
+        // Final fallback path in case of provider error
+        const fallback = buildFallbackQuestion(input);
+        console.warn('[MCQ] generation.provider_error_using_fallback', {
+          error: error.message,
+        });
+        return { questions: [fallback], progress: 'Used fallback due to provider error.' };
       }
 
       const wrappedError = new McqGenerationError('MCQ generation failed', {

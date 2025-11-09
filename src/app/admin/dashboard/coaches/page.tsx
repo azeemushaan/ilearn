@@ -1,4 +1,5 @@
 import { CoachesTable } from '@/components/admin/coaches-table';
+export const dynamic = 'force-dynamic';
 import { listCoaches, listInvoices, listPayments, listSubscriptions } from '@/lib/firestore/admin-ops';
 
 export default async function CoachesPage() {

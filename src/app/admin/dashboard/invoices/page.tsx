@@ -1,4 +1,5 @@
 import { InvoicesTable } from '@/components/admin/invoices-table';
+export const dynamic = 'force-dynamic';
 import { listCoaches, listInvoices } from '@/lib/firestore/admin-ops';
 
 export default async function InvoicesPage() {

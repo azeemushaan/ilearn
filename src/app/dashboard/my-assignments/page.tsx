@@ -8,6 +8,7 @@ import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth, useDoc }
 import { collection, query, where, doc } from 'firebase/firestore';
 import { PlayCircle, Clock, CheckCircle2, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
+import { NotificationBell } from '@/components/ui/notification-bell';
 
 export default function MyAssignmentsPage() {
   const firestore = useFirestore();
@@ -79,9 +80,12 @@ export default function MyAssignmentsPage() {
   return (
     <div className="flex flex-1 flex-col">
       <header className="p-4 md:p-6 border-b bg-gradient-to-r from-blue-50 to-purple-50">
-        <div className="space-y-2">
-          <h1 className="text-3xl font-headline font-bold">My Assignments</h1>
-          <p className="text-muted-foreground">Complete your assigned playlists and track your progress</p>
+        <div className="flex items-center justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-headline font-bold">My Assignments</h1>
+            <p className="text-muted-foreground">Complete your assigned playlists and track your progress</p>
+          </div>
+          <NotificationBell />
         </div>
       </header>
       

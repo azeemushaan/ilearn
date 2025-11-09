@@ -26,11 +26,19 @@ export async function generateAttentionCheck(input: GenerateAttentionCheckInput)
   return generateAttentionCheckFlow(input);
 }
 
+const promptConfig: Record<string, unknown> = {
+  ...aiRuntimeConfig,
+};
+
+if (!aiModelName.startsWith('googleai/')) {
+  promptConfig.model = aiModelName;
+}
+
 const prompt = ai.definePrompt({
   name: 'generateAttentionCheckPrompt',
   input: {schema: GenerateAttentionCheckInputSchema},
   output: {schema: GenerateAttentionCheckOutputSchema},
-  prompt: `You are an AI assistant helping teachers to create engaging educational content.
+  prompt: `You are an AI assistant helping coach/teaching assistant to create engaging educational content.
 
   Given the video title and a summary of the current segment, generate a short, one-tap attention check prompt to ensure the student is paying attention.
   The prompt should be easy to answer and require minimal effort from the student.
@@ -40,10 +48,8 @@ const prompt = ai.definePrompt({
   Segment Summary: {{{segmentSummary}}}
 
   Attention Check Prompt:`,
-  config: {
-    model: aiModelName,
-    ...aiRuntimeConfig,
-  },
+  config: promptConfig,
+  
 });
 
 const generateAttentionCheckFlow = ai.defineFlow(

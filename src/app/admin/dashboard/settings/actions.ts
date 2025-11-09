@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { updateSystemAiSettings, updateSystemSettings } from '@/lib/firestore/admin-ops';
 import { requireAdmin } from '@/lib/auth/server';
 
@@ -9,12 +10,48 @@ export async function updateSettingsAction(formData: FormData) {
   const manualPaymentsEnabled = formData.get('manualPaymentsEnabled') === 'on';
   const supportEmail = String(formData.get('supportEmail'));
   const logoUrl = formData.get('logoUrl') ? String(formData.get('logoUrl')) : undefined;
+  const primaryColor = formData.get('primaryColor') ? String(formData.get('primaryColor')) : undefined;
+  const secondaryColor = formData.get('secondaryColor') ? String(formData.get('secondaryColor')) : undefined;
+  
+  // Handle file upload
+  const logoFile = formData.get('logoFile') as File | null;
+  let uploadedLogoUrl = logoUrl;
+  
+  if (logoFile && logoFile.size > 0) {
+    try {
+      // Upload file to Cloud Storage
+      const { adminStorage } = await import('@/lib/firebase/admin');
+      const bucket = adminStorage().bucket();
+      const fileName = `logos/${Date.now()}-${logoFile.name}`;
+      const file = bucket.file(fileName);
+      
+      const buffer = Buffer.from(await logoFile.arrayBuffer());
+      await file.save(buffer, {
+        metadata: {
+          contentType: logoFile.type,
+        }
+      });
+      
+      // Make file publicly accessible
+      await file.makePublic();
+      uploadedLogoUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+    } catch (error) {
+      console.error('Failed to upload logo:', error);
+      // Continue with existing logoUrl if upload fails
+    }
+  }
+  
   await updateSystemSettings({
     manualPaymentsEnabled,
     supportEmail,
-    branding: { logoUrl },
+    branding: { 
+      logoUrl: uploadedLogoUrl,
+      primaryColor,
+      secondaryColor,
+    },
   }, admin.uid);
   revalidatePath('/admin/dashboard/settings');
+  redirect('/admin/dashboard/settings?saved=general');
 }
 
 export async function updateAiSettingsAction(formData: FormData) {
@@ -46,4 +83,5 @@ export async function updateAiSettingsAction(formData: FormData) {
   await updateSystemAiSettings(updates, admin.uid);
   revalidatePath('/admin/dashboard/settings');
   revalidatePath('/admin/dashboard/settings/prompts');
+  redirect('/admin/dashboard/settings?saved=ai');
 }

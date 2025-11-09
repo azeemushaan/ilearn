@@ -44,17 +44,8 @@ next-env.d.ts
 firebase-debug.log
 firestore-debug.log
 
-# sensitive files
+# service account keys and sensitive files
 sa-key.json
 *-*.json
-client_secret_*.json
 .env.local
-.env.development.local
-.env.test.local
-.env.production.local
-.env.*.local
-
-# specific sensitive files
-studio-*-*.json
-*-firebase-adminsdk-*.json
-oldkey
+.env*.local

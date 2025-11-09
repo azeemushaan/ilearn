@@ -39,6 +39,20 @@ export async function prepareVideoContent(input: PrepareVideoContentInput): Prom
   return prepareVideoContentFlow(input);
 }
 
+const generateMcqsPromptConfig: Record<string, unknown> = {
+  ...aiRuntimeConfig,
+  safetySettings: [
+    {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH'},
+    {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_LOW_AND_ABOVE'},
+    {category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE'},
+    {category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH'},
+  ],
+};
+
+if (!aiModelName.startsWith('googleai/')) {
+  generateMcqsPromptConfig.model = aiModelName;
+}
+
 const generateMcqsPrompt = ai.definePrompt({
   name: 'generateMcqsPrompt',
   input: {schema: PrepareVideoContentInputSchema},
@@ -53,7 +67,7 @@ const generateMcqsPrompt = ai.definePrompt({
   - Disallow personal data.
   - Maintain a neutral tone.
   - Ensure the content is child-safe.
-  - Avoid controversial topics unless educationally relevant and teacher-approved.
+  - Avoid controversial topics unless educationally relevant and coach-approved.
 
   Here's the transcript chunk:
   {{transcriptChunk}}
@@ -64,16 +78,7 @@ const generateMcqsPrompt = ai.definePrompt({
 
   Generate one MCQ based on the above information.
   `,
-  config: {
-    model: aiModelName,
-    ...aiRuntimeConfig,
-    safetySettings: [
-      {category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH'},
-      {category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_LOW_AND_ABOVE'},
-      {category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_MEDIUM_AND_ABOVE'},
-      {category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH'},
-    ],
-  },
+  config: generateMcqsPromptConfig,
 });
 
 const prepareVideoContentFlow = ai.defineFlow(

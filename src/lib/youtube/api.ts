@@ -171,7 +171,7 @@ export async function fetchVideosMetadata(videoIds: string[]): Promise<YouTubeVi
  */
 export async function fetchVideoCaptions(videoId: string, accessToken?: string): Promise<YouTubeCaption | null> {
   // Note: YouTube Captions API requires OAuth and channel ownership
-  // For now, we'll return null and rely on teacher-uploaded SRT files
+  // For now, we'll return null and rely on coach-uploaded SRT files
   // or use chaptersOnly mode
   
   if (!accessToken) {

@@ -43,7 +43,7 @@
       "description": "Represents any signed-in user of the platform.",
       "properties": {
         "coachId": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "teacher", "student"] },
+        "role": { "type": "string", "enum": ["admin", "coach", "student"] },
         "profile": {
           "type": "object",
           "properties": {
@@ -162,8 +162,8 @@
         },
         "required": ["actorId", "action", "target", "ts"]
     },
-    "TeacherSubscription": {
-        "title": "TeacherSubscription",
+    "coachSubscription": {
+        "title": "coachSubscription",
         "type": "object",
         "description": "Legacy subscription model.",
         "properties": {
@@ -193,6 +193,6 @@
     "/invoices/{invoiceId}": { "schema": { "$ref": "#/entities/Invoice" }, "description": "Stores invoice details." },
     "/audit/{auditId}": { "schema": { "$ref": "#/entities/Audit" }, "description": "Audit trail for important actions." },
     "/settings/theme": { "schema": {}, "description": "Global theme settings." },
-    "/teacher_subscriptions/{id}": { "schema": { "$ref": "#/entities/TeacherSubscription" }, "description": "Legacy subscriptions." }
+    "/coach_subscriptions/{id}": { "schema": { "$ref": "#/entities/coachSubscription" }, "description": "Legacy subscriptions." }
   }
 }

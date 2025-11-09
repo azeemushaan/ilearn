@@ -8,10 +8,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { PlayCircle, CheckCircle, Clock, Video as VideoIcon, TrendingUp } from 'lucide-react';
+import { PlayCircle, CheckCircle, Clock, Video as VideoIcon, TrendingUp, MoreVertical, FileText, RotateCw, Settings } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import Link from 'next/link';
 import Image from 'next/image';
 import React from 'react';
+import { StatusChip, getStepLabel } from '@/components/video/status-chip';
+import { ProcessVideoModal } from '@/components/video/process-video-modal';
+import { useToast } from '@/hooks/use-toast';
 
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -26,11 +30,22 @@ function formatDuration(seconds: number): string {
 
 export default function AssignmentPage({ params }: { params: Promise<{ assignmentId: string }> }) {
   const firestore = useFirestore();
-  const { user } = useFirebaseAuth();
+  const { user, claims } = useFirebaseAuth();
+  const { toast } = useToast();
   
   // Unwrap the params Promise
   const unwrappedParams = React.use(params);
   const assignmentId = unwrappedParams.assignmentId;
+
+  // Process modal state
+  const [processModalOpen, setProcessModalOpen] = useState(false);
+  const [selectedVideoForProcessing, setSelectedVideoForProcessing] = useState<any>(null);
+  
+  // Video status polling
+  const [pollingVideoIds, setPollingVideoIds] = useState<Set<string>>(new Set());
+
+  const isCoach = claims?.role === 'coach';
+  const isStudent = claims?.role === 'student';
 
   const assignmentRef = useMemoFirebase(() => {
     if (!firestore) return null;
@@ -78,6 +93,33 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
   }).length || 0;
 
   const isLoading = loadingAssignment || loadingPlaylist || loadingVideos;
+
+  // Filter videos for students (hide failed)
+  const visibleVideos = isStudent 
+    ? videos?.filter((v: any) => v.status !== 'failed')
+    : videos;
+
+  // Handle process video
+  const handleProcessVideo = (video: any) => {
+    setSelectedVideoForProcessing(video);
+    setProcessModalOpen(true);
+  };
+
+  // Handle process success
+  const handleProcessSuccess = () => {
+    toast({
+      title: 'Success!',
+      description: 'Video processed successfully',
+    });
+    // Refresh will happen automatically via Firestore listener
+  };
+
+  // Get friendly status message for students
+  const getStudentStatusMessage = (status: string) => {
+    if (status === 'not_ready') return 'This video is being prepared';
+    if (status === 'processing') return 'Processing... check back soon';
+    return null;
+  };
 
   if (isLoading) {
     return (
@@ -177,7 +219,7 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
         <div className="space-y-4">
           <h2 className="text-xl font-semibold">Videos</h2>
           
-          {!videos || videos.length === 0 ? (
+          {!visibleVideos || visibleVideos.length === 0 ? (
             <Card className="border-2 border-dashed">
               <CardHeader className="text-center py-12">
                 <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
@@ -185,13 +227,15 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
                 </div>
                 <CardTitle>No Videos Yet</CardTitle>
                 <CardDescription className="max-w-md mx-auto">
-                  This playlist is being processed. Videos will appear here once they're ready.
+                  {isStudent 
+                    ? 'This playlist is being processed. Videos will appear here once they\'re ready.'
+                    : 'No videos found in this playlist.'}
                 </CardDescription>
               </CardHeader>
             </Card>
           ) : (
             <div className="space-y-3">
-              {videos.map((video: any, index: number) => {
+              {visibleVideos.map((video: any, index: number) => {
                 const progress = getVideoProgress(video.id);
                 const isCompleted = progress?.watchPct >= 80;
                 const watchPct = progress?.watchPct || 0;
@@ -208,6 +252,7 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
                               src={video.thumbnailUrl} 
                               alt={video.title}
                               fill
+                              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 160px"
                               className="object-cover"
                             />
                           ) : (
@@ -223,13 +268,14 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
                         {/* Video Info */}
                         <div className="flex-1 space-y-2">
                           <div className="flex items-start justify-between">
-                            <div>
-                              <div className="flex items-center gap-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm text-muted-foreground font-medium">#{index + 1}</span>
                                 <h3 className="font-semibold text-lg">{video.title}</h3>
                                 {isCompleted && (
                                   <CheckCircle className="h-5 w-5 text-green-600" />
                                 )}
+                                <StatusChip status={video.status || 'not_ready'} />
                               </div>
                               {video.description && (
                                 <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
@@ -237,6 +283,35 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
                                 </p>
                               )}
                             </div>
+                            
+                            {/* Coach-only action menu */}
+                            {isCoach && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleProcessVideo(video)}>
+                                    <Settings className="h-4 w-4 mr-2" />
+                                    {video.status === 'not_ready' ? 'Process Video' : 'Reprocess'}
+                                  </DropdownMenuItem>
+                                  {video.status === 'failed' && (
+                                    <DropdownMenuItem onClick={() => handleProcessVideo(video)}>
+                                      <RotateCw className="h-4 w-4 mr-2" />
+                                      Retry Processing
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/dashboard/videos/${video.id}/logs`}>
+                                      <FileText className="h-4 w-4 mr-2" />
+                                      View Logs
+                                    </Link>
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
                           </div>
 
                           {/* Progress Bars */}
@@ -261,38 +336,69 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
 
                           {/* Action Button */}
                           <div className="flex items-center gap-2 pt-2">
-                            <Button asChild size="sm" className="min-w-[120px]">
-                              <Link href={`/dashboard/watch/${video.id}?assignmentId=${assignmentId}`}>
-                                {watchPct > 0 ? (
-                                  <>
-                                    <PlayCircle className="h-4 w-4 mr-1" />
-                                    Continue
-                                  </>
-                                ) : (
-                                  <>
-                                    <PlayCircle className="h-4 w-4 mr-1" />
-                                    Start
-                                  </>
+                            {video.status === 'ready' ? (
+                              <>
+                                <Button asChild size="sm" className="min-w-[120px]">
+                                  <Link href={`/dashboard/watch/${video.id}?assignmentId=${assignmentId}`}>
+                                    {watchPct > 0 ? (
+                                      <>
+                                        <PlayCircle className="h-4 w-4 mr-1" />
+                                        Continue
+                                      </>
+                                    ) : (
+                                      <>
+                                        <PlayCircle className="h-4 w-4 mr-1" />
+                                        Start
+                                      </>
+                                    )}
+                                  </Link>
+                                </Button>
+                                {video.segmentCount > 0 && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {video.segmentCount} quiz checkpoints
+                                  </span>
                                 )}
-                              </Link>
-                            </Button>
-                            
-                            {video.status !== 'ready' && (
-                              <Badge variant="outline" className="text-xs">
-                                {video.status === 'processing' ? 'Processing...' : video.status}
-                              </Badge>
-                            )}
-
-                            {video.status === 'error' && video.errorMessage && (
-                              <span className="text-xs text-destructive">
-                                Error details: {video.errorMessage}
-                              </span>
-                            )}
-
-                            {video.segmentCount > 0 && (
-                              <span className="text-xs text-muted-foreground">
-                                {video.segmentCount} quiz checkpoints
-                              </span>
+                              </>
+                            ) : (
+                              <>
+                                {isStudent ? (
+                                  <div className="flex items-center gap-2">
+                                    <Button size="sm" disabled className="min-w-[120px]">
+                                      <Clock className="h-4 w-4 mr-1" />
+                                      Not Ready
+                                    </Button>
+                                    <span className="text-xs text-muted-foreground">
+                                      {getStudentStatusMessage(video.status)}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <Button 
+                                      size="sm" 
+                                      onClick={() => handleProcessVideo(video)}
+                                      variant={video.status === 'failed' ? 'destructive' : 'default'}
+                                      className="min-w-[120px]"
+                                    >
+                                      {video.status === 'failed' ? (
+                                        <>
+                                          <RotateCw className="h-4 w-4 mr-1" />
+                                          Retry
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Settings className="h-4 w-4 mr-1" />
+                                          Process
+                                        </>
+                                      )}
+                                    </Button>
+                                    {video.status === 'failed' && video.errorMessage && (
+                                      <span className="text-xs text-destructive">
+                                        {video.errorMessage}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -305,6 +411,20 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
           )}
         </div>
       </main>
+
+      {/* Process Video Modal */}
+      {selectedVideoForProcessing && (
+        <ProcessVideoModal
+          open={processModalOpen}
+          onOpenChange={setProcessModalOpen}
+          videoId={selectedVideoForProcessing.id}
+          videoTitle={selectedVideoForProcessing.title}
+          youtubeVideoId={selectedVideoForProcessing.youtubeVideoId}
+          userId={user?.uid || ''}
+          coachId={claims?.coachId || ''}
+          onSuccess={handleProcessSuccess}
+        />
+      )}
     </div>
   );
 }

@@ -59,7 +59,7 @@ export async function requireAdmin(): Promise<AuthenticatedUser> {
   return user;
 }
 
-export async function requireRole(roles: Array<'admin' | 'teacher' | 'student'>): Promise<AuthenticatedUser> {
+export async function requireRole(roles: Array<'admin' | 'coach' | 'student'>): Promise<AuthenticatedUser> {
   const user = await getAuthenticatedUser();
   if (!user || !user.role || !roles.includes(user.role as any)) {
     throw new Error('Forbidden');
