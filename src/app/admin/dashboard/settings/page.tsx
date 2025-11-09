@@ -1,6 +1,7 @@
 import { getSystemAiSettings, getSystemSettings, listPromptTemplates } from '@/lib/firestore/admin-ops';
 export const dynamic = 'force-dynamic';
 import { updateSettingsAction, updateAiSettingsAction } from './actions';
+import { AiTestConnectionForm } from './ai-test-connection-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -90,7 +91,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: { 
             Choose the AI provider and system prompt template used for quiz generation.
           </p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
           <form action={updateAiSettingsAction} className="space-y-4">
             <div className="grid max-w-md gap-2">
               <label htmlFor="provider" className="text-sm font-medium">AI provider</label>
@@ -142,7 +143,7 @@ export default async function SettingsPage({ searchParams }: { searchParams?: { 
                 <option value="">Use default prompt</option>
                 {promptTemplates.map(template => (
                   <option key={template.id} value={template.id}>
-                    {template.name}{template.active ? ' (active)' : ''}
+                    {`${template.name} (v${template.version}${template.active ? ', active' : ''})`}
                   </option>
                 ))}
               </select>
@@ -156,6 +157,9 @@ export default async function SettingsPage({ searchParams }: { searchParams?: { 
             </div>
             <Button type="submit">Save AI settings</Button>
           </form>
+          <div className="border-t pt-4">
+            <AiTestConnectionForm disabled={!aiSettings.hasApiKey} />
+          </div>
         </CardContent>
       </Card>
     </div>
