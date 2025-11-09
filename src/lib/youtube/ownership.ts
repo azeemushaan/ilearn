@@ -100,7 +100,9 @@ export async function verifyVideoOwnership(
       // Continue with just owned channels
     }
 
-    const owned = Boolean(videoChannelId && userChannelIds.includes(videoChannelId));
+    const channelOwned = Boolean(videoChannelId && userChannelIds.includes(videoChannelId));
+    const hasAccess = true; // We successfully fetched video data, so user has access
+    const owned = channelOwned; // For backwards compatibility
 
     console.log('[Ownership] Channel verification:', {
       videoId,
