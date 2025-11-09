@@ -128,8 +128,7 @@ service cloud.firestore {
     // Phase 3: Manual Processing Collections
     match /notifications/{notificationId} {
       allow get: if request.auth != null && resource.data.userId == request.auth.uid;
-      allow list: if request.auth != null &&
-                     request.query.limit <= 20;
+      allow list: if request.auth != null && resource.data.userId == request.auth.uid;
       allow create: if false; // Only backend creates notifications
       allow update: if request.auth != null && resource.data.userId == request.auth.uid; // Allow marking as read
       allow delete: if request.auth != null && resource.data.userId == request.auth.uid;

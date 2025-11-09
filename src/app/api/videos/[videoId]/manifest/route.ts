@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminFirestore, adminStorage } from '@/lib/firebase/admin';
-import { videoManifestSchema, type VideoManifest } from '@/lib/schemas';
+import { adminAuth, adminFirestore, adminStorage } from '@/lib/firebase/admin';
+import { buildVideoManifest } from '@/lib/videos/manifest';
+import { videoManifestSchema } from '@/lib/schemas';
 
 type RouteParams = { videoId: string };
 
@@ -47,8 +48,13 @@ export async function GET(
       );
     }
 
-    // Verify the token (simplified - in production, verify with Firebase Admin)
     const token = authHeader.substring(7);
+    try {
+      await adminAuth().verifyIdToken(token);
+    } catch (error) {
+      console.error('[manifest] token.verify_failed', toLoggableError(error));
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     
     const { videoId } = await params;
     const db = adminFirestore();
@@ -64,7 +70,7 @@ export async function GET(
     const videoData = videoDoc.data()!;
 
     // Check status before attempting cache usage
-    if (videoData.status === 'processing') {
+    if (videoData.status === 'processing' || videoData.status === 'pending') {
       return NextResponse.json(
         { error: 'Video is still being processed' },
         { status: 409 }
@@ -128,7 +134,7 @@ export async function GET(
     }
 
     // 3. Manifest doesn't exist or cache unavailable, generate it
-    const manifest = await buildManifest(videoId, videoData);
+    const manifest = await buildVideoManifest(videoId, videoData);
 
     // 4. Cache to Cloud Storage when available
     if (file) {
@@ -171,57 +177,4 @@ export async function GET(
       { status: 500 }
     );
   }
-}
-
-async function buildManifest(videoId: string, videoData: any): Promise<VideoManifest> {
-  const db = adminFirestore();
-  
-  // Fetch all segments
-  const segmentsSnapshot = await db
-    .collection(`videos/${videoId}/segments`)
-    .orderBy('tStartSec')
-    .get();
-  
-  const segments = [];
-  let totalQuestions = 0;
-  
-  for (const segmentDoc of segmentsSnapshot.docs) {
-    const segmentData = segmentDoc.data();
-    
-    // Fetch questions for this segment
-    const questionsSnapshot = await db
-      .collection(`videos/${videoId}/segments/${segmentDoc.id}/questions`)
-      .get();
-    
-    const questionIds = questionsSnapshot.docs.map(q => q.id);
-    totalQuestions += questionIds.length;
-    
-    segments.push({
-      segmentId: segmentDoc.id,
-      segmentIndex: segmentData.segmentIndex,
-      tStartSec: segmentData.tStartSec,
-      tEndSec: segmentData.tEndSec,
-      durationSec: segmentData.tEndSec - segmentData.tStartSec,
-      questionIds,
-      difficulty: segmentData.difficulty,
-    });
-  }
-  
-  const manifest = {
-    videoId,
-    youtubeVideoId: videoData.youtubeVideoId,
-    title: videoData.title,
-    duration: videoData.duration,
-    status: videoData.status,
-    hasCaptions: videoData.hasCaptions || false,
-    chaptersOnly: videoData.chaptersOnly || false,
-    segments,
-    totalSegments: segments.length,
-    totalQuestions,
-    generatedAt: new Date().toISOString(),
-    version: '1.0',
-  };
-  
-  // Validate with Zod
-  return videoManifestSchema.parse(manifest);
 }

@@ -1,5 +1,6 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import { adminFirestore, adminStorage, adminAuth } from '@/lib/firebase/admin';
+import { hashSecret } from '@/lib/crypto/hash';
 import {
   aiProviderSchema,
   aiSettingsSchema,
@@ -139,6 +140,8 @@ export type SystemAiSettings = {
   activePromptId: string | null;
   apiKeyMask: string | null;
   hasApiKey: boolean;
+  apiKeyHash?: string | null;
+  apiKeyUpdatedAt?: Date | null;
 };
 
 function maskApiKey(apiKey: string) {
@@ -179,6 +182,13 @@ export async function getSystemAiSettings(): Promise<SystemAiSettings> {
     ? docData.activePromptId
     : null;
   const apiKey = typeof docData.apiKey === 'string' ? docData.apiKey : null;
+  const apiKeyHash = typeof docData.apiKeyHash === 'string' ? docData.apiKeyHash : null;
+  const apiKeyUpdatedAtRaw = docData.apiKeyUpdatedAt;
+  const apiKeyUpdatedAt = apiKeyUpdatedAtRaw instanceof Timestamp
+    ? apiKeyUpdatedAtRaw.toDate()
+    : typeof apiKeyUpdatedAtRaw?.toDate === 'function'
+    ? apiKeyUpdatedAtRaw.toDate()
+    : null;
 
   return {
     provider,
@@ -186,6 +196,8 @@ export async function getSystemAiSettings(): Promise<SystemAiSettings> {
     activePromptId,
     apiKeyMask: maskApiKey(apiKey ?? ''),
     hasApiKey: Boolean(apiKey),
+    apiKeyHash,
+    apiKeyUpdatedAt,
   } satisfies SystemAiSettings;
 }
 
@@ -213,6 +225,8 @@ export async function updateSystemAiSettings(settings: UpdateAiSettingsInput, ac
   if (settings.apiKey !== undefined) {
     const sanitized = settings.apiKey && settings.apiKey.trim().length > 0 ? settings.apiKey.trim() : null;
     payload.apiKey = sanitized;
+    payload.apiKeyHash = sanitized ? hashSecret(sanitized) : null;
+    payload.apiKeyUpdatedAt = nowTimestamp();
   }
 
   if ('activePromptId' in settings) {
@@ -227,6 +241,7 @@ export async function updateSystemAiSettings(settings: UpdateAiSettingsInput, ac
   if (payload.model) meta.model = payload.model;
   if ('apiKey' in payload) meta.apiKeyUpdated = Boolean(payload.apiKey);
   if ('activePromptId' in payload) meta.activePromptId = payload.activePromptId;
+  if ('apiKeyHash' in payload) meta.apiKeyHash = payload.apiKeyHash;
 
   await writeAudit({
     actorId,

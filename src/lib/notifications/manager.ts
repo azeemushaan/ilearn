@@ -15,6 +15,7 @@ export type NotificationType =
 
 export interface NotificationData {
   userId: string;
+  coachId?: string | null;
   type: NotificationType;
   title: string;
   message: string;
@@ -30,6 +31,7 @@ export async function createNotification(data: NotificationData): Promise<string
   
   const notificationRef = await db.collection('notifications').add({
     userId: data.userId,
+    coachId: data.coachId || null,
     type: data.type,
     title: data.title,
     message: data.message,
@@ -48,6 +50,18 @@ export async function createNotification(data: NotificationData): Promise<string
   return notificationRef.id;
 }
 
+async function getCoachRecipientIds(coachId: string): Promise<string[]> {
+  const db = adminFirestore();
+  const snapshot = await db
+    .collection('users')
+    .where('coachId', '==', coachId)
+    .get();
+  const recipients = snapshot.docs
+    .filter(doc => ['coach', 'admin'].includes(doc.data()?.role))
+    .map(doc => doc.id);
+  return recipients.length > 0 ? recipients : [coachId];
+}
+
 /**
  * Notify coach that video is ready
  */
@@ -57,14 +71,20 @@ export async function notifyVideoReady(
   videoTitle: string,
   assignmentId?: string
 ): Promise<void> {
-  await createNotification({
-    userId: coachId,
-    type: 'coach_video_ready',
-    title: 'Video Ready',
-    message: `"${videoTitle}" has been processed and is ready for students`,
-    actionUrl: assignmentId ? `/dashboard/assignments/${assignmentId}` : `/dashboard/videos/${videoId}`,
-    metadata: { videoId, videoTitle, assignmentId },
-  });
+  const recipients = await getCoachRecipientIds(coachId);
+  await Promise.all(
+    recipients.map(userId =>
+      createNotification({
+        userId,
+        coachId,
+        type: 'coach_video_ready',
+        title: 'Video Ready',
+        message: `"${videoTitle}" has been processed and is ready for students`,
+        actionUrl: assignmentId ? `/dashboard/assignments/${assignmentId}` : `/dashboard/videos/${videoId}`,
+        metadata: { videoId, videoTitle, assignmentId },
+      })
+    )
+  );
 }
 
 /**
@@ -77,14 +97,20 @@ export async function notifyVideoFailed(
   errorMessage: string,
   assignmentId?: string
 ): Promise<void> {
-  await createNotification({
-    userId: coachId,
-    type: 'coach_video_failed',
-    title: 'Video Processing Failed',
-    message: `"${videoTitle}" failed: ${errorMessage}`,
-    actionUrl: assignmentId ? `/dashboard/assignments/${assignmentId}` : `/dashboard/videos/${videoId}`,
-    metadata: { videoId, videoTitle, errorMessage, assignmentId },
-  });
+  const recipients = await getCoachRecipientIds(coachId);
+  await Promise.all(
+    recipients.map(userId =>
+      createNotification({
+        userId,
+        coachId,
+        type: 'coach_video_failed',
+        title: 'Video Processing Failed',
+        message: `"${videoTitle}" failed: ${errorMessage}`,
+        actionUrl: assignmentId ? `/dashboard/assignments/${assignmentId}` : `/dashboard/videos/${videoId}`,
+        metadata: { videoId, videoTitle, errorMessage, assignmentId },
+      })
+    )
+  );
 }
 
 /**
@@ -101,14 +127,20 @@ export async function notifyBatchComplete(
     ? `Batch complete: ${successCount} succeeded, ${failedCount} failed`
     : `Batch complete: All ${successCount} videos processed successfully`;
 
-  await createNotification({
-    userId: coachId,
-    type: 'coach_batch_complete',
-    title: 'Batch Processing Complete',
-    message,
-    actionUrl: `/admin/processing/queue?jobId=${jobId}`,
-    metadata: { jobId, totalVideos, successCount, failedCount },
-  });
+  const recipients = await getCoachRecipientIds(coachId);
+  await Promise.all(
+    recipients.map(userId =>
+      createNotification({
+        userId,
+        coachId,
+        type: 'coach_batch_complete',
+        title: 'Batch Processing Complete',
+        message,
+        actionUrl: `/admin/processing/queue?jobId=${jobId}`,
+        metadata: { jobId, totalVideos, successCount, failedCount },
+      })
+    )
+  );
 }
 
 /**
@@ -127,6 +159,7 @@ export async function notifyStudentsVideoReady(
     const notificationRef = db.collection('notifications').doc();
     batch.set(notificationRef, {
       userId: studentId,
+      coachId: null,
       type: 'student_video_ready',
       title: 'New Video Available',
       message: `"${videoTitle}" is now ready to watch`,
@@ -150,14 +183,20 @@ export async function notifyStudentsVideoReady(
  * Notify coach that OAuth token expired
  */
 export async function notifyOAuthExpired(coachId: string): Promise<void> {
-  await createNotification({
-    userId: coachId,
-    type: 'oauth_expired',
-    title: 'YouTube Connection Expired',
-    message: 'Please reconnect your YouTube account to continue using OAuth captions',
-    actionUrl: '/dashboard/youtube',
-    metadata: {},
-  });
+  const recipients = await getCoachRecipientIds(coachId);
+  await Promise.all(
+    recipients.map(userId =>
+      createNotification({
+        userId,
+        coachId,
+        type: 'oauth_expired',
+        title: 'YouTube Connection Expired',
+        message: 'Please reconnect your YouTube account to continue using OAuth captions',
+        actionUrl: '/dashboard/youtube',
+        metadata: {},
+      })
+    )
+  );
 }
 
 /**
@@ -202,4 +241,3 @@ export async function getUnreadCount(userId: string): Promise<number> {
 
   return unreadSnapshot.size;
 }
-
