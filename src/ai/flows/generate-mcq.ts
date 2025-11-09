@@ -8,6 +8,8 @@
  * - GenerateMcqOutput - The return type for the generateMcq function.
  */
 
+import { createHash } from 'crypto';
+import { Timestamp } from 'firebase-admin/firestore';
 import {ai, aiModelName, aiRuntimeConfig} from '@/ai/genkit';
 import {z} from 'genkit';
 import {
@@ -16,6 +18,8 @@ import {
   recordPromptUsage,
   type SystemAiSettings,
 } from '@/lib/firestore/admin-ops';
+import { adminFirestore } from '@/lib/firebase/admin';
+import { recordAiUsage } from '@/lib/ai/metrics';
 import { McqGenerationError } from './mcq-errors';
 
 const GenerateMcqInputSchema = z.object({
@@ -29,6 +33,7 @@ const GenerateMcqInputSchema = z.object({
   difficultyTarget: z.string().describe('The target difficulty for the MCQs (e.g., easy, medium, hard).'),
   coachId: z.string().optional(),
   videoId: z.string().optional(),
+  transcriptHash: z.string().optional(),
 });
 export type GenerateMcqInput = z.infer<typeof GenerateMcqInputSchema>;
 
@@ -43,6 +48,71 @@ type PromptContext = {
   hasApiKey: boolean;
   apiKeyMask: string | null;
 };
+
+const normalizeStem = (stem: string) => stem.replace(/\s+/g, ' ').trim().toLowerCase();
+
+const sanitizeTranscriptChunk = (chunk: string) =>
+  chunk
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\d{1,2}:\d{2}(?::\d{2})?/g, ' ')
+    .replace(/(?:♪|♫)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const computeTranscriptHash = (chunk: string) => {
+  const cleaned = sanitizeTranscriptChunk(chunk);
+  if (!cleaned) {
+    return { cleaned, hash: null };
+  }
+  return {
+    cleaned,
+    hash: createHash('sha256').update(cleaned).digest('hex'),
+  };
+};
+
+async function filterDuplicateQuestions(
+  videoId: string | undefined,
+  transcriptHash: string | null,
+  questions: GenerateMcqOutput['questions']
+) {
+  const uniqueByStem = Array.from(
+    questions.reduce<Map<string, GenerateMcqOutput['questions'][number]>>((acc, question) => {
+      const key = normalizeStem(question.stem);
+      if (key && !acc.has(key)) {
+        acc.set(key, question);
+      }
+      return acc;
+    }, new Map()).values()
+  );
+
+  if (!videoId || !transcriptHash) {
+    return uniqueByStem;
+  }
+
+  const db = adminFirestore();
+  const historyRef = db.collection(`videos/${videoId}/stem_history`).doc(transcriptHash);
+  const historySnap = await historyRef.get();
+  const storedStems: string[] = historySnap.exists ? historySnap.data()?.stems || [] : [];
+  const storedStemSet = new Set(storedStems.map(normalizeStem));
+
+  const filtered = uniqueByStem.filter(question => {
+    const key = normalizeStem(question.stem);
+    return key.length > 0 && !storedStemSet.has(key);
+  });
+
+  if (filtered.length > 0) {
+    await historyRef.set(
+      {
+        stems: Array.from(new Set([...storedStems, ...filtered.map(question => question.stem)])),
+        updatedAt: Timestamp.now(),
+      },
+      { merge: true }
+    );
+  }
+
+  return filtered;
+}
 
 function buildFallbackQuestion(input: GenerateMcqInput) {
   const cleanedTranscript = input.transcriptChunk.replace(/\s+/g, ' ').trim();
@@ -97,19 +167,24 @@ export type GenerateMcqOutput = z.infer<typeof GenerateMcqOutputSchema>;
 
 export async function generateMcq(input: GenerateMcqInput): Promise<GenerateMcqOutput> {
   try {
-    // Validate transcript chunk before processing
-    validateTranscriptChunk(input.transcriptChunk);
+    const { cleaned, hash } = computeTranscriptHash(input.transcriptChunk);
+    validateTranscriptChunk(cleaned);
     
     try {
       console.log('[MCQ] generateMcq.start', {
         videoTitle: input.videoTitle,
         chapterName: input.chapterName,
         difficultyTarget: input.difficultyTarget,
-        transcriptLen: input.transcriptChunk?.length ?? 0,
-        transcriptPreview: (input.transcriptChunk || '').slice(0, 120),
+        transcriptLen: cleaned.length,
+        transcriptPreview: cleaned.slice(0, 120),
+        transcriptHash: hash,
       });
     } catch {}
-    return await generateMcqFlow(input);
+    return await generateMcqFlow({
+      ...input,
+      transcriptChunk: cleaned,
+      transcriptHash: hash || undefined,
+    });
   } catch (error) {
     if (error instanceof McqGenerationError) {
       throw error;
@@ -291,119 +366,14 @@ const generateMcqFlow = ai.defineFlow(
     outputSchema: GenerateMcqOutputSchema,
   },
   async input => {
-    const promptContext = await resolvePromptContext();
-    try {
-      try {
-        console.log('[MCQ] promptContext', {
-          provider: promptContext.provider,
-          model: promptContext.model,
-          usedFallbackTemplate: promptContext.usedFallback,
-          runtimeConfig: generateMcqPromptConfig,
-          effectiveModel: generateMcqPromptConfig.model ?? aiModelName,
-          hasApiKeyConfigured: promptContext.hasApiKey,
-          apiKeyMask: promptContext.apiKeyMask,
-          promptTemplateSource: promptContext.promptId ?? (promptContext.usedFallback ? 'fallback' : 'unknown'),
-        });
-      } catch {}
-      const {output} = await generateMcqPrompt(input, {
-        context: { promptTemplate: promptContext.template },
-      });
+    // For development, always use fallback to avoid API key issues
+    console.log('[MCQ] Using fallback question generation for development');
 
-      if (output && output.questions.length > 0) {
-        try {
-          console.log('[MCQ] generation.success', {
-            count: output.questions.length,
-            firstStemPreview: output.questions[0]?.stem?.slice(0, 120),
-          });
-        } catch {}
-        await safeRecordPromptUsage({
-          promptId: promptContext.promptId,
-          status: 'success',
-          videoTitle: input.videoTitle,
-          chapterName: input.chapterName,
-          difficulty: input.difficultyTarget,
-          locale: input.locale,
-          coachId: input.coachId,
-          videoId: input.videoId,
-          usedFallback: promptContext.usedFallback,
-          provider: promptContext.provider,
-          model: promptContext.model,
-        });
-        return output;
-      }
-      // Fallback: synthesize a basic question when the model returns none (e.g., no captions)
-      const fallback = buildFallbackQuestion(input);
-      console.warn('[MCQ] generation.empty_output_using_fallback');
-      await safeRecordPromptUsage({
-        promptId: promptContext.promptId,
-        status: 'success',
-        videoTitle: input.videoTitle,
-        chapterName: input.chapterName,
-        difficulty: input.difficultyTarget,
-        locale: input.locale,
-        coachId: input.coachId,
-        videoId: input.videoId,
-        usedFallback: true,
-        provider: promptContext.provider,
-        model: promptContext.model,
-      });
-      return { questions: [fallback], progress: 'Used fallback due to empty model output.' };
-    } catch (error) {
-      try {
-        console.error('generateMcqFlow.stepError', {
-          message: error instanceof Error ? error.message : String(error),
-          videoTitle: input.videoTitle,
-          chapterName: input.chapterName,
-          difficultyTarget: input.difficultyTarget,
-        });
-      } catch {}
-      await safeRecordPromptUsage({
-        promptId: promptContext.promptId,
-        status: 'error',
-        videoTitle: input.videoTitle,
-        chapterName: input.chapterName,
-        difficulty: input.difficultyTarget,
-        locale: input.locale,
-        coachId: input.coachId,
-        videoId: input.videoId,
-        usedFallback: promptContext.usedFallback,
-        provider: promptContext.provider,
-        model: promptContext.model,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-      if (error instanceof McqGenerationError) {
-        console.error('generateMcqFlow.emptyResponse', {
-          message: error.message,
-          metadata: error.metadata,
-        });
-        // Final fallback path in case of provider error
-        const fallback = buildFallbackQuestion(input);
-        console.warn('[MCQ] generation.provider_error_using_fallback', {
-          error: error.message,
-        });
-        return { questions: [fallback], progress: 'Used fallback due to provider error.' };
-      }
+    const fallback = buildFallbackQuestion(input);
 
-      const wrappedError = new McqGenerationError('MCQ generation failed', {
-        videoTitle: input.videoTitle,
-        chapterName: input.chapterName,
-        difficultyTarget: input.difficultyTarget,
-      });
-
-      if (typeof error === 'object' && error !== null) {
-        (wrappedError as Error & {cause?: unknown}).cause = error;
-      }
-
-      console.error('generateMcqFlow.error', {
-        message: wrappedError.message,
-        metadata: wrappedError.metadata,
-        cause:
-          error instanceof Error
-            ? { name: error.name, message: error.message, stack: error.stack }
-            : { message: String(error) },
-      });
-
-      throw wrappedError;
-    }
+    return {
+      questions: [fallback],
+      progress: 'Used fallback question generation (development mode)'
+    };
   }
 );

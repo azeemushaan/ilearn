@@ -70,6 +70,12 @@ export const planSchema = z.object({
   enableCustomBranding: z.boolean().default(false),
   enableAPIAccess: z.boolean().default(false),
   enablePrioritySupport: z.boolean().default(false),
+  concurrency: z
+    .object({
+      perCoach: z.number().int().min(1),
+      global: z.number().int().min(1),
+    })
+    .optional(),
   isActive: z.boolean().default(true),
   sort: z.number().int().default(0),
   createdAt: nullableTimestamp,
@@ -193,6 +199,8 @@ export const aiSettingsSchema = z
     model: z.string().min(1).default(defaultAiSettings.model),
     baseUrl: z.string().url().optional(),
     apiKeySecret: z.string().min(1).optional(),
+    apiKeyHash: z.string().optional(),
+    apiKeyUpdatedAt: nullableTimestamp,
     runtime: aiRuntimeSchema.default({}),
     requestHeaders: z.record(z.string()).default({}),
   })
@@ -209,11 +217,24 @@ export const systemBrandingSchema = z
   })
   .default({});
 
+const processingSettingsSchema = z
+  .object({
+    concurrency: z
+      .object({
+        perCoach: z.number().int().min(1).default(2),
+        global: z.number().int().min(1).default(10),
+      })
+      .default({ perCoach: 2, global: 10 }),
+    jobHeartbeatTimeoutSec: z.number().int().min(30).default(300),
+  })
+  .default({ concurrency: { perCoach: 2, global: 10 }, jobHeartbeatTimeoutSec: 300 });
+
 const systemSettingsBaseSchema = z.object({
   manualPaymentsEnabled: z.boolean().default(true),
   supportEmail: z.string().email().default('support@example.com'),
   branding: systemBrandingSchema,
   ai: aiSettingsSchema,
+  processing: processingSettingsSchema,
 });
 
 export const systemSettingsSchema = systemSettingsBaseSchema.default({
@@ -221,6 +242,7 @@ export const systemSettingsSchema = systemSettingsBaseSchema.default({
   supportEmail: 'support@example.com',
   branding: {},
   ai: defaultAiSettings,
+  processing: { concurrency: { perCoach: 2, global: 10 }, jobHeartbeatTimeoutSec: 300 },
 });
 
 export const systemSettingsUpdateSchema = systemSettingsBaseSchema.partial();
@@ -312,12 +334,13 @@ export type Assignment = z.infer<typeof assignmentSchema> & { id: string };
 
 export const attemptSchema = z.object({
   studentId: z.string().min(1),
-  assignmentId: z.string().min(1),
+  assignmentId: z.string().min(1).nullable(),
   questionId: z.string().min(1),
   segmentId: z.string().min(1),
   videoId: z.string().min(1),
   chosenIndex: z.number().int().min(0).max(3),
   isCorrect: z.boolean(),
+  segmentIndex: z.number().int().min(0).optional(),
   latencyMs: z.number().int().min(0).optional(),
   ts: nullableTimestamp,
 });
@@ -326,14 +349,18 @@ export type Attempt = z.infer<typeof attemptSchema> & { id: string };
 
 export const progressSchema = z.object({
   studentId: z.string().min(1),
-  assignmentId: z.string().min(1),
+  assignmentId: z.string().min(1).nullable(),
   videoId: z.string().min(1),
   watchPct: z.number().min(0).max(100).default(0),
   score: z.number().min(0).max(100).default(0),
   attempts: z.number().int().min(0).default(0),
+  correctAttempts: z.number().int().min(0).default(0),
   lastSegmentId: z.string().optional(),
   lastActivityAt: nullableTimestamp,
   completedAt: nullableTimestamp,
+  segmentsCompleted: z.array(z.string()).default([]),
+  lastVerifiedTimeSec: z.number().min(0).default(0),
+  questionHistory: z.record(z.array(z.string())).default({}),
   createdAt: nullableTimestamp,
   updatedAt: nullableTimestamp,
 });

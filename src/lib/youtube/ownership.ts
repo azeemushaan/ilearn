@@ -66,10 +66,6 @@ export async function verifyVideoOwnership(
       channelTitle: videoData.snippet?.channelTitle,
     });
 
-    // If we can access the video details, we have some level of access
-    // For unlisted videos, channelId might be available even if privacyStatus is 'unlisted'
-    const hasAccess = !!videoData.snippet?.title; // If we can get title, we have access
-
     if (!videoChannelId) {
       return {
         videoId,
@@ -104,12 +100,7 @@ export async function verifyVideoOwnership(
       // Continue with just owned channels
     }
 
-    // Check if video belongs to user's channels
-    const channelOwned = videoChannelId && userChannelIds.includes(videoChannelId);
-
-    // For unlisted videos, if we can access the video details, consider it owned
-    // This handles cases where channel ownership check fails but we have direct access
-    const owned = channelOwned || (hasAccess && !!videoChannelId);
+    const owned = Boolean(videoChannelId && userChannelIds.includes(videoChannelId));
 
     console.log('[Ownership] Channel verification:', {
       videoId,
@@ -136,14 +127,18 @@ export async function verifyVideoOwnership(
     return result;
   } catch (error) {
     console.error('[Ownership] Verification failed:', error);
-    
-    // Return unknown/not owned if API call fails
-    return {
+    const fallback: OwnershipResult = {
       videoId,
       owned: false,
       cached: false,
       verifiedAt: new Date(),
     };
+    try {
+      await cacheOwnershipResult(videoId, fallback, userId);
+    } catch (cacheError) {
+      console.warn('[Ownership] Failed to cache fallback result', cacheError);
+    }
+    return fallback;
   }
 }
 
@@ -284,4 +279,3 @@ export async function invalidateUserOwnershipCache(userId: string): Promise<void
 
   await batch.commit();
 }
-

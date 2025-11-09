@@ -33,11 +33,13 @@ export async function listCaptionTracks(
 
   try {
     console.log('[Captions] Listing tracks for video:', videoId);
-    const response = await youtube.captions.list({
-      auth: oauth2Client,
-      part: ['snippet'],
-      videoId: videoId,
-    });
+    const response = await withRetry('captions.list', () =>
+      youtube.captions.list({
+        auth: oauth2Client,
+        part: ['snippet'],
+        videoId,
+      })
+    );
 
     console.log('[Captions] List response:', {
       success: true,
@@ -83,124 +85,20 @@ export async function downloadCaptionContent(
 
   try {
     console.log('[Captions] Downloading caption:', { captionId, format });
-    const response = await youtube.captions.download({
-      auth: oauth2Client,
-      id: captionId,
-      tfmt: format, // 'srt' or 'vtt'
-    });
+    const response = await withRetry('captions.download', () =>
+      youtube.captions.download(
+        {
+          auth: oauth2Client,
+          id: captionId,
+          tfmt: format,
+        },
+        { responseType: 'arraybuffer' }
+      )
+    );
 
-    console.log('[Captions] Download response type:', typeof response.data);
-    console.log('[Captions] Download response preview:', typeof response.data === 'string' ? response.data.substring(0, 200) : JSON.stringify(response.data).substring(0, 200));
-
-    if (typeof response.data === 'string') {
-      console.log('[Captions] Returning string content, length:', response.data.length);
-      return response.data;
-    }
-
-    // Handle Blob responses (common for YouTube captions API)
-    if (response.data instanceof Blob) {
-      console.log('[Captions] Converting Blob to text, size:', response.data.size);
-      const textContent = await response.data.text();
-      console.log('[Captions] Blob converted to text, length:', textContent.length);
-      console.log('[Captions] Text content preview:', textContent.substring(0, 200));
-      return textContent;
-    }
-
-    // Handle Blob-like objects that have a text() method
-    if (response.data && typeof response.data === 'object' && typeof (response.data as any).text === 'function') {
-      console.log('[Captions] Converting Blob-like object with text() method');
-      try {
-        const textContent = await (response.data as any).text();
-        console.log('[Captions] Blob-like object converted to text, length:', textContent.length);
-        console.log('[Captions] Text content preview:', textContent.substring(0, 200));
-        return textContent;
-      } catch (e) {
-        console.log('[Captions] text() method failed, trying arrayBuffer');
-        // Try arrayBuffer as fallback
-        if (typeof (response.data as any).arrayBuffer === 'function') {
-          try {
-            const arrayBuffer = await (response.data as any).arrayBuffer();
-            const textContent = Buffer.from(arrayBuffer).toString('utf8');
-            console.log('[Captions] arrayBuffer converted to text, length:', textContent.length);
-            console.log('[Captions] Text content preview:', textContent.substring(0, 200));
-            return textContent;
-          } catch (e2) {
-            console.log('[Captions] arrayBuffer method also failed');
-          }
-        }
-      }
-    }
-
-    // Handle Buffer responses (Node.js environment)
-    if (Buffer.isBuffer(response.data)) {
-      console.log('[Captions] Converting Buffer to text, size:', response.data.length);
-      const textContent = response.data.toString('utf8');
-      console.log('[Captions] Buffer converted to text, length:', textContent.length);
-      console.log('[Captions] Text content preview:', textContent.substring(0, 200));
-      return textContent;
-    }
-
-    // Handle objects that look like Blobs (have buffer property)
-    if (response.data && typeof response.data === 'object' && (response.data as any).buffer) {
-      console.log('[Captions] Converting buffer-like object to text, size:', (response.data as any).buffer.length);
-      const textContent = Buffer.from((response.data as any).buffer).toString('utf8');
-      console.log('[Captions] Buffer-like object converted to text, length:', textContent.length);
-      console.log('[Captions] Text content preview:', textContent.substring(0, 200));
-      return textContent;
-    }
-
-    // Handle objects that have [Symbol(buffer)] property (Node.js Blob-like objects)
-    if (response.data && typeof response.data === 'object') {
-      // Try to find buffer data in symbol properties
-      const symbols = Object.getOwnPropertySymbols(response.data);
-      for (const symbol of symbols) {
-        if (symbol.toString().includes('buffer') && (response.data as any)[symbol]) {
-          console.log('[Captions] Found buffer in symbol property:', symbol.toString());
-          const buffer = (response.data as any)[symbol];
-          const textContent = Buffer.from(buffer).toString('utf8');
-          console.log('[Captions] Symbol buffer converted to text, length:', textContent.length);
-          console.log('[Captions] Text content preview:', textContent.substring(0, 200));
-          return textContent;
-        }
-      }
-
-      // If it looks like a Blob but instanceof failed, try direct buffer access
-      if ((response.data as any).constructor && (response.data as any).constructor.name === 'Blob') {
-        console.log('[Captions] Object looks like Blob but instanceof failed, trying direct buffer access');
-        // Try to access [Symbol(buffer)] directly
-        const bufferSymbol = Symbol('buffer');
-        if ((response.data as any)[bufferSymbol]) {
-          const buffer = (response.data as any)[bufferSymbol];
-          const textContent = Buffer.from(buffer).toString('utf8');
-          console.log('[Captions] Direct symbol buffer access worked, length:', textContent.length);
-          console.log('[Captions] Text content preview:', textContent.substring(0, 200));
-          return textContent;
-        }
-      }
-    }
-
-    // Handle objects with _buffer property (alternative Blob structure)
-    if (response.data && typeof response.data === 'object' && (response.data as any)._buffer) {
-      console.log('[Captions] Converting _buffer object to text');
-      const buffer = (response.data as any)._buffer;
-      const textContent = Buffer.from(buffer).toString('utf8');
-      console.log('[Captions] _buffer object converted to text, length:', textContent.length);
-      console.log('[Captions] Text content preview:', textContent.substring(0, 200));
-      return textContent;
-    }
-
-    // Debug: log available methods and properties
-    if (response.data && typeof response.data === 'object') {
-      console.log('[Captions] Object methods:', Object.getOwnPropertyNames(response.data));
-      console.log('[Captions] Object symbols:', Object.getOwnPropertySymbols(response.data).map(s => s.toString()));
-      console.log('[Captions] Constructor name:', (response.data as any).constructor?.name);
-      console.log('[Captions] Has text method:', typeof (response.data as any).text === 'function');
-      console.log('[Captions] Has arrayBuffer method:', typeof (response.data as any).arrayBuffer === 'function');
-    }
-
-    // If we can't handle the response format, throw an error
-    console.error('[Captions] Unsupported response data type:', response.data);
-    throw new Error('Unable to process caption download response - unsupported data format');
+    const textContent = await toText(response.data);
+    console.log('[Captions] Downloaded captions length:', textContent.length);
+    return textContent;
   } catch (error) {
     console.error('[Captions] Failed to download:', error);
     const errorDetails = error as any;
@@ -315,4 +213,45 @@ export async function getCaptionTrackSummary(
     };
   }
 }
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+const shouldRetry = (error: any) => {
+  const status = error?.code || error?.response?.status;
+  return status === 429 || status === 500 || status === 503;
+};
+
+async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetry(error) || attempt === attempts) {
+        break;
+      }
+      const backoff = attempt * 500;
+      console.warn(`[Captions] ${label} retry ${attempt}/${attempts}`, { backoff });
+      await sleep(backoff);
+    }
+  }
+  throw lastError;
+}
+
+const toText = async (payload: any): Promise<string> => {
+  if (!payload) return '';
+  if (typeof payload === 'string') return payload;
+  if (payload instanceof Buffer) return payload.toString('utf8');
+  if (payload instanceof ArrayBuffer) return Buffer.from(payload).toString('utf8');
+  if (typeof payload.arrayBuffer === 'function') {
+    const buffer = await payload.arrayBuffer();
+    return Buffer.from(buffer).toString('utf8');
+  }
+  if (typeof payload.text === 'function') {
+    return payload.text();
+  }
+  if (payload?.buffer) {
+    return Buffer.from(payload.buffer).toString('utf8');
+  }
+  return JSON.stringify(payload);
+};

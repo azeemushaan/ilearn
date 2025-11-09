@@ -5,7 +5,7 @@
 
 import { adminFirestore } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
-import { reserveCredits, consumeCredits, refundCredits, releaseReservedCredits, estimateCredits } from '@/lib/credits/manager';
+import { consumeCredits, refundCredits, releaseReservedCredits, estimateCredits } from '@/lib/credits/manager';
 
 export interface BatchJobConfig {
   type: 'captions' | 'segment' | 'mcq' | 'manifest' | 'full';
@@ -25,43 +25,74 @@ export interface ConcurrencyLimits {
   global: number;
 }
 
+type ProcessingSettings = {
+  concurrency: ConcurrencyLimits;
+  jobHeartbeatTimeoutSec: number;
+};
+
+const DEFAULT_PROCESSING_SETTINGS: ProcessingSettings = {
+  concurrency: { perCoach: 2, global: 10 },
+  jobHeartbeatTimeoutSec: 300,
+};
+
+async function getProcessingSettings(): Promise<ProcessingSettings> {
+  const db = adminFirestore();
+  const doc = await db.collection('settings').doc('system').get();
+  if (!doc.exists) {
+    return DEFAULT_PROCESSING_SETTINGS;
+  }
+  const processing = doc.data()?.processing ?? {};
+  const concurrency = processing.concurrency ?? {};
+  return {
+    concurrency: {
+      perCoach: typeof concurrency.perCoach === 'number' && concurrency.perCoach > 0 ? concurrency.perCoach : DEFAULT_PROCESSING_SETTINGS.concurrency.perCoach,
+      global: typeof concurrency.global === 'number' && concurrency.global > 0 ? concurrency.global : DEFAULT_PROCESSING_SETTINGS.concurrency.global,
+    },
+    jobHeartbeatTimeoutSec:
+      typeof processing.jobHeartbeatTimeoutSec === 'number' && processing.jobHeartbeatTimeoutSec >= 30
+        ? processing.jobHeartbeatTimeoutSec
+        : DEFAULT_PROCESSING_SETTINGS.jobHeartbeatTimeoutSec,
+  };
+}
+
+async function resolvePlanConcurrency(coachData: any): Promise<ConcurrencyLimits | null> {
+  const db = adminFirestore();
+  const planId = coachData?.plan?.planId || coachData?.planId || coachData?.plan?.id;
+  if (!planId) return null;
+  const planDoc = await db.collection('plans').doc(planId).get();
+  if (!planDoc.exists) return null;
+  const raw = planDoc.data()?.concurrency;
+  if (!raw) return null;
+  const perCoach = typeof raw.perCoach === 'number' && raw.perCoach > 0 ? raw.perCoach : null;
+  const global = typeof raw.global === 'number' && raw.global > 0 ? raw.global : null;
+  if (!perCoach && !global) return null;
+  return {
+    perCoach: perCoach ?? DEFAULT_PROCESSING_SETTINGS.concurrency.perCoach,
+    global: global ?? DEFAULT_PROCESSING_SETTINGS.concurrency.global,
+  };
+}
+
 /**
  * Get concurrency limits from plan or system settings
  */
-export async function getConcurrencyLimits(coachId: string): Promise<ConcurrencyLimits> {
+export async function getConcurrencyLimits(coachId: string): Promise<{ limits: ConcurrencyLimits; heartbeatTimeoutSec: number }> {
   const db = adminFirestore();
-  
-  // Get coach's plan
-  const coachDoc = await db.collection('coaches').doc(coachId).get();
-  if (!coachDoc.exists) {
-    return { perCoach: 2, global: 10 }; // Defaults
+  const [coachSnap, settings] = await Promise.all([
+    db.collection('coaches').doc(coachId).get(),
+    getProcessingSettings(),
+  ]);
+  if (!coachSnap.exists) {
+    return { limits: settings.concurrency, heartbeatTimeoutSec: settings.jobHeartbeatTimeoutSec };
   }
-
-  const coachData = coachDoc.data()!;
-  const planId = coachData.plan?.planId;
-
-  if (planId) {
-    const planDoc = await db.collection('plans').doc(planId).get();
-    if (planDoc.exists) {
-      const planData = planDoc.data()!;
-      return {
-        perCoach: planData.concurrency?.perCoach || 2,
-        global: planData.concurrency?.global || 10,
-      };
-    }
-  }
-
-  // Fallback to system settings
-  const settingsDoc = await db.collection('settings').doc('system').get();
-  if (settingsDoc.exists) {
-    const settingsData = settingsDoc.data()!;
-    return {
-      perCoach: settingsData.processing?.concurrency?.perCoach || 2,
-      global: settingsData.processing?.concurrency?.global || 10,
-    };
-  }
-
-  return { perCoach: 2, global: 10 };
+  const coachData = coachSnap.data() || {};
+  const planConcurrency = await resolvePlanConcurrency(coachData);
+  return {
+    limits: {
+      perCoach: planConcurrency?.perCoach ?? coachData.plan?.concurrency?.perCoach ?? settings.concurrency.perCoach,
+      global: planConcurrency?.global ?? settings.concurrency.global,
+    },
+    heartbeatTimeoutSec: settings.jobHeartbeatTimeoutSec,
+  };
 }
 
 /**
@@ -69,7 +100,7 @@ export async function getConcurrencyLimits(coachId: string): Promise<Concurrency
  */
 export async function canStartJob(coachId: string): Promise<{ allowed: boolean; reason?: string }> {
   const db = adminFirestore();
-  const limits = await getConcurrencyLimits(coachId);
+  const { limits } = await getConcurrencyLimits(coachId);
 
   // Check per-coach limit
   const coachJobsSnapshot = await db.collection('batch_jobs')
@@ -105,62 +136,86 @@ export async function canStartJob(coachId: string): Promise<{ allowed: boolean; 
 export async function createBatchJob(config: BatchJobConfig): Promise<string> {
   const db = adminFirestore();
 
-  // Check concurrency limits
-  const canStart = await canStartJob(config.coachId);
-  if (!canStart.allowed) {
-    throw new Error(canStart.reason);
+  const concurrencyAllowance = await canStartJob(config.coachId);
+  if (!concurrencyAllowance.allowed) {
+    throw new Error(concurrencyAllowance.reason);
   }
 
-  // Estimate credits if using AI transcription
   let creditsToReserve = 0;
   if (config.config?.captionSource === 'ai') {
-    // Fetch video durations
-    const videoRefs = config.videoIds.map(id => db.collection('videos').doc(id));
-    const videoDocs = await Promise.all(videoRefs.map(ref => ref.get()));
-    
+    const videoDocs = await Promise.all(
+      config.videoIds.map(id => db.collection('videos').doc(id).get())
+    );
     creditsToReserve = videoDocs.reduce((sum, doc) => {
       if (doc.exists) {
-        const duration = doc.data()!.duration || 0;
+        const duration = doc.data()?.duration || 0;
         return sum + estimateCredits(duration);
       }
       return sum;
     }, 0);
-
-    // Reserve credits
-    if (creditsToReserve > 0) {
-      await reserveCredits(config.coachId, creditsToReserve, config.createdBy, {
-        reason: 'Batch job reservation',
-      });
-    }
   }
 
-  // Create batch job document
   const jobRef = db.collection('batch_jobs').doc();
-  
+  const now = Timestamp.now();
   const statusByVideo: Record<string, 'queued' | 'running' | 'completed' | 'failed'> = {};
   config.videoIds.forEach(videoId => {
     statusByVideo[videoId] = 'queued';
   });
 
-  await jobRef.set({
-    type: config.type,
-    videoIds: config.videoIds,
-    coachId: config.coachId,
-    createdBy: config.createdBy,
-    config: config.config || {},
-    status: 'queued',
-    progress: {
-      total: config.videoIds.length,
-      completed: 0,
-      failed: 0,
-      running: 0,
-    },
-    statusByVideo,
-    reservedCredits: creditsToReserve,
-    consumedCredits: 0,
-    createdAt: Timestamp.now(),
-    startedAt: null,
-    completedAt: null,
+  await db.runTransaction(async transaction => {
+    if (creditsToReserve > 0) {
+      const billingRef = db.collection('coach_billing').doc(config.coachId);
+      const billingSnap = await transaction.get(billingRef);
+      if (!billingSnap.exists) {
+        throw new Error('Billing record not found');
+      }
+      const billingData = billingSnap.data() || {};
+      const balance = billingData.balance || 0;
+      const reserved = billingData.reservedCredits || 0;
+      const available = balance - reserved;
+      if (available < creditsToReserve) {
+        throw new Error(`Insufficient credits. Need ${creditsToReserve}, have ${available}`);
+      }
+      transaction.update(billingRef, {
+        reservedCredits: reserved + creditsToReserve,
+        updatedAt: now,
+      });
+      const creditTxRef = db.collection('credit_transactions').doc();
+      transaction.set(creditTxRef, {
+        coachId: config.coachId,
+        type: 'reserve',
+        amount: creditsToReserve,
+        videoId: null,
+        batchJobId: jobRef.id,
+        reason: 'Batch job reservation',
+        balanceBefore: balance,
+        balanceAfter: balance,
+        actorId: config.createdBy,
+        createdAt: now,
+      });
+    }
+
+    transaction.set(jobRef, {
+      type: config.type,
+      videoIds: config.videoIds,
+      coachId: config.coachId,
+      createdBy: config.createdBy,
+      config: config.config || {},
+      status: 'queued',
+      progress: {
+        total: config.videoIds.length,
+        completed: 0,
+        failed: 0,
+        running: 0,
+      },
+      statusByVideo,
+      reservedCredits: creditsToReserve,
+      consumedCredits: 0,
+      createdAt: now,
+      startedAt: null,
+      completedAt: null,
+      heartbeatAt: now,
+    });
   });
 
   console.log('[Batch] Job created:', {
@@ -328,6 +383,7 @@ export async function updateJobVideoStatus(
     const updates: any = {
       statusByVideo,
       progress,
+      heartbeatAt: Timestamp.now(),
     };
 
     // Update consumed credits
@@ -359,7 +415,7 @@ export async function updateJobVideoStatus(
  */
 export async function getNextVideoToProcess(coachId: string): Promise<{ jobId: string; videoId: string } | null> {
   const db = adminFirestore();
-  const limits = await getConcurrencyLimits(coachId);
+  const { limits } = await getConcurrencyLimits(coachId);
 
   // Check current running count for this coach
   const runningJobsSnapshot = await db.collection('batch_jobs')
@@ -398,7 +454,10 @@ export async function getNextVideoToProcess(coachId: string): Promise<{ jobId: s
           await jobDoc.ref.update({
             status: 'running',
             startedAt: Timestamp.now(),
+            heartbeatAt: Timestamp.now(),
           });
+        } else {
+          await jobDoc.ref.update({ heartbeatAt: Timestamp.now() });
         }
 
         return {
@@ -412,3 +471,43 @@ export async function getNextVideoToProcess(coachId: string): Promise<{ jobId: s
   return null;
 }
 
+export async function reapStaleJobs(actorId = 'system'): Promise<number> {
+  const db = adminFirestore();
+  const settings = await getProcessingSettings();
+  const cutoffDate = new Date(Date.now() - settings.jobHeartbeatTimeoutSec * 1000);
+  const cutoffTimestamp = Timestamp.fromDate(cutoffDate);
+
+  const snapshot = await db
+    .collection('batch_jobs')
+    .where('status', 'in', ['queued', 'running'])
+    .where('heartbeatAt', '<', cutoffTimestamp)
+    .limit(25)
+    .get();
+
+  if (snapshot.empty) {
+    return 0;
+  }
+
+  let cleaned = 0;
+  for (const doc of snapshot.docs) {
+    const data = doc.data() || {};
+    await doc.ref.update({
+      status: 'failed',
+      completedAt: Timestamp.now(),
+      failureReason: 'heartbeat_timeout',
+    });
+
+    const reserved = data.reservedCredits || 0;
+    const consumed = data.consumedCredits || 0;
+    const toRelease = Math.max(0, reserved - consumed);
+    if (toRelease > 0) {
+      await releaseReservedCredits(data.coachId, toRelease, actorId, {
+        batchJobId: doc.id,
+        reason: 'heartbeat_timeout',
+      });
+    }
+    cleaned++;
+  }
+
+  return cleaned;
+}

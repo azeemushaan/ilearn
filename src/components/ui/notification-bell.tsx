@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useFirestore, useFirebaseAuth } from '@/firebase';
 import { collection, query, where, orderBy, limit, onSnapshot, updateDoc, doc, writeBatch } from 'firebase/firestore';
+import { toast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 
@@ -21,6 +22,7 @@ interface Notification {
   type: string;
   title: string;
   message: string;
+  coachId?: string | null;
   actionUrl?: string;
   read: boolean;
   createdAt: any;
@@ -80,7 +82,11 @@ export function NotificationBell() {
           },
           (error) => {
             console.error('[Notifications] Listener error:', error);
-            // Fallback to empty state if listener fails
+            toast({
+              title: 'Notifications unavailable',
+              description: 'Real-time updates temporarily disabled. Please refresh later.',
+              variant: 'destructive',
+            });
             setNotifications([]);
             setUnreadCount(0);
           }
@@ -269,4 +275,3 @@ export function NotificationBell() {
     </DropdownMenu>
   );
 }
-

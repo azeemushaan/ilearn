@@ -1,17 +1,29 @@
 'use client';
 
-import React from 'react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, use } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useRouter } from 'next/navigation';
 import { useFirestore, useDoc, useCollection, useMemoFirebase, useFirebaseAuth } from '@/firebase';
-import { doc, collection, query, where, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import {
+  doc,
+  collection,
+  query,
+  where,
+  updateDoc,
+  serverTimestamp,
+  onSnapshot,
+  getDoc,
+  getDocs,
+  setDoc,
+  arrayUnion,
+} from 'firebase/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from '@/hooks/use-toast';
 import { AlertCircle, Loader2 } from 'lucide-react';
+import { buildProgressDocId } from '@/lib/progress/utils';
 
 declare global {
   interface Window {
@@ -20,26 +32,67 @@ declare global {
   }
 }
 
-export default function WatchPage({ params }: { params: Promise<{ videoId: string }> }) {
-  const { user, claims } = useFirebaseAuth();
+type SegmentQuestion = {
+  id: string;
+  stem: string;
+  options: string[];
+  correctIndex: number;
+  rationale?: string;
+  difficulty?: string;
+  segmentId: string;
+  segmentIndex: number;
+};
+
+type ProgressState = {
+  docId: string | null;
+  segmentsCompleted: string[];
+  questionHistory: Record<string, string[]>;
+  lastVerifiedTimeSec: number;
+  watchPct: number;
+  score: number;
+  attempts: number;
+  correctAttempts: number;
+};
+
+const DEFAULT_PROGRESS_STATE: ProgressState = {
+  docId: null,
+  segmentsCompleted: [],
+  questionHistory: {},
+  lastVerifiedTimeSec: 0,
+  watchPct: 0,
+  score: 0,
+  attempts: 0,
+  correctAttempts: 0,
+};
+
+type WatchPageProps = { params: Promise<{ videoId: string }> };
+
+export default function WatchPage({ params }: WatchPageProps) {
+  const { user } = useFirebaseAuth();
   const firestore = useFirestore();
   const router = useRouter();
   const searchParams = useSearchParams();
   const assignmentId = searchParams?.get('assignmentId') || null;
-  
-  // Unwrap the params Promise
-  const unwrappedParams = React.use(params);
-  const videoId = unwrappedParams.videoId;
+
+  const { videoId } = use(params);
 
   const [player, setPlayer] = useState<any>(null);
   const [showQuiz, setShowQuiz] = useState(false);
-  const [currentQuestion, setCurrentQuestion] = useState<any>(null);
+  const [currentQuestion, setCurrentQuestion] = useState<SegmentQuestion | null>(null);
   const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [answered, setAnswered] = useState(false);
+  const [progressState, setProgressState] = useState<ProgressState>(DEFAULT_PROGRESS_STATE);
+  const [progressReady, setProgressReady] = useState(false);
+  const [segmentNotice, setSegmentNotice] = useState<string | null>(null);
   const playerRef = useRef<HTMLDivElement>(null);
   const checkIntervalRef = useRef<any>(null);
   const lastValidTimeRef = useRef<number>(0);
+  const minSegmentIndexRef = useRef<number>(0);
+  const progressDocRef = useRef<ReturnType<typeof doc> | null>(null);
+  const sessionQuestionHistoryRef = useRef<Record<string, Set<string>>>({});
+  const currentSegmentIndexRef = useRef<number>(0);
+  const enforcedSegmentRef = useRef<{ index: number; warningShown: boolean }>({ index: 0, warningShown: false });
 
   // Manifest state
   const [manifest, setManifest] = useState<any>(null);
@@ -55,6 +108,20 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
 
   // Use manifest segments instead of Firestore query
   const sortedSegments = manifest?.segments || [];
+
+  const completedSegmentsSet = useMemo(() => {
+    return new Set(progressState.segmentsCompleted);
+  }, [progressState.segmentsCompleted]);
+
+  const nextRequiredSegmentIndex = useMemo(() => {
+    if (!sortedSegments.length) return 0;
+    for (let i = 0; i < sortedSegments.length; i++) {
+      if (!completedSegmentsSet.has(sortedSegments[i].segmentId)) {
+        return i;
+      }
+    }
+    return Math.max(sortedSegments.length - 1, 0);
+  }, [sortedSegments, completedSegmentsSet]);
 
   // Debug logging (only on mount and key changes)
   useEffect(() => {
@@ -75,6 +142,127 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
       segmentsCount: sortedSegments.length,
     });
   }, [loadingVideo, loadingManifest, video?.status, manifest?.videoId]);
+
+  useEffect(() => {
+    if (!firestore || !user?.uid || !videoId) return;
+
+    const canonicalId = buildProgressDocId(user.uid, assignmentId, videoId);
+    const canonicalRef = doc(firestore, 'progress', canonicalId);
+    progressDocRef.current = canonicalRef;
+
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+
+    const parseProgressState = (raw: any): ProgressState => ({
+      docId: canonicalId,
+      segmentsCompleted: Array.isArray(raw?.segmentsCompleted) ? raw.segmentsCompleted : [],
+      questionHistory: typeof raw?.questionHistory === 'object' && raw?.questionHistory !== null ? raw.questionHistory : {},
+      lastVerifiedTimeSec: typeof raw?.lastVerifiedTimeSec === 'number' ? raw.lastVerifiedTimeSec : 0,
+      watchPct: typeof raw?.watchPct === 'number' ? raw.watchPct : 0,
+      score: typeof raw?.score === 'number' ? raw.score : 0,
+      attempts: typeof raw?.attempts === 'number' ? raw.attempts : 0,
+      correctAttempts: typeof raw?.correctAttempts === 'number' ? raw.correctAttempts : 0,
+    });
+
+    const startListener = () => {
+      unsubscribe = onSnapshot(
+        canonicalRef,
+        snapshot => {
+          if (!snapshot.exists()) {
+            setProgressState(DEFAULT_PROGRESS_STATE);
+            setProgressReady(true);
+            return;
+          }
+          setProgressState(parseProgressState(snapshot.data()));
+          setProgressReady(true);
+        },
+        error => {
+          console.error('[WATCH] Progress listener error:', error);
+          setProgressReady(true);
+        }
+      );
+    };
+
+    const ensureProgressDocument = async () => {
+      try {
+        const existing = await getDoc(canonicalRef);
+        if (cancelled) return;
+        if (existing.exists()) {
+          startListener();
+          return;
+        }
+
+        const legacyQuery = query(
+          collection(firestore, 'progress'),
+          where('studentId', '==', user.uid),
+          where('videoId', '==', videoId),
+          where('assignmentId', '==', assignmentId)
+        );
+        const legacySnap = await getDocs(legacyQuery);
+        if (cancelled) return;
+
+        if (!legacySnap.empty) {
+          const legacyData = legacySnap.docs[0].data();
+          await setDoc(
+            canonicalRef,
+            {
+              ...legacyData,
+              assignmentId,
+              updatedAt: serverTimestamp(),
+              migratedFrom: legacySnap.docs[0].id,
+            },
+            { merge: true }
+          );
+        } else {
+          await setDoc(
+            canonicalRef,
+            {
+              studentId: user.uid,
+              assignmentId,
+              videoId,
+              watchPct: 0,
+              score: 0,
+              attempts: 0,
+              correctAttempts: 0,
+              segmentsCompleted: [],
+              questionHistory: {},
+              lastVerifiedTimeSec: 0,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        }
+
+        if (!cancelled) {
+          startListener();
+        }
+      } catch (error) {
+        console.error('[WATCH] Failed to prepare progress doc:', error);
+        setProgressReady(true);
+      }
+    };
+
+    ensureProgressDocument();
+
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
+  }, [firestore, user?.uid, videoId, assignmentId]);
+
+  useEffect(() => {
+    if (!progressReady) return;
+    minSegmentIndexRef.current = nextRequiredSegmentIndex;
+    if (currentSegmentIndex < nextRequiredSegmentIndex) {
+      setCurrentSegmentIndex(nextRequiredSegmentIndex);
+    }
+  }, [progressReady, nextRequiredSegmentIndex, currentSegmentIndex]);
+
+  useEffect(() => {
+    if (!progressReady) return;
+    lastValidTimeRef.current = Math.max(lastValidTimeRef.current, progressState.lastVerifiedTimeSec || 0);
+  }, [progressReady, progressState.lastVerifiedTimeSec]);
 
   // Fetch manifest from API
   useEffect(() => {
@@ -138,13 +326,43 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
     }
   }, []);
 
+  const handlePlaybackRateChange = useCallback((event: any) => {
+    const rate = typeof event?.data === 'number' ? event.data : 1;
+    if (rate <= 1.25) return;
+    if (event?.target?.setPlaybackRate) {
+      event.target.setPlaybackRate(1);
+    }
+    toast({
+      title: 'Playback limited',
+      description: 'Fast-forwarding is disabled during checkpoints.',
+    });
+    setSegmentNotice('Playback speed reset to 1x for fairness.');
+    setTimeout(() => setSegmentNotice(null), 3000);
+  }, []);
+
+  const getSegmentByIndex = useCallback(
+    (index: number) => (index >= 0 && index < sortedSegments.length ? sortedSegments[index] : null),
+    [sortedSegments]
+  );
+
+  const handlePossibleSeek = useCallback(
+    (ytPlayer: any) => {
+      const activeSegment = getSegmentByIndex(currentSegmentIndexRef.current);
+      if (!activeSegment) return;
+      const currentTime = ytPlayer.getCurrentTime();
+      enforceSegmentBoundary(ytPlayer, activeSegment, currentTime);
+    },
+    [getSegmentByIndex]
+  );
+
   // Initialize player when video data and ref are ready
   useEffect(() => {
-    if (!video || !window.YT || !manifest) {
+    if (!video || !window.YT || !manifest || !progressReady) {
       console.log('[WATCH] Player init skipped - waiting for:', {
         hasVideo: !!video,
         hasYT: !!window.YT,
         hasManifest: !!manifest,
+        progressReady,
       });
       return;
     }
@@ -216,10 +434,13 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
               } else if (event.data === window.YT.PlayerState.PAUSED) {
                 console.log('[WATCH] Video paused');
                 stopTimeCheck();
+              } else if (event.data === window.YT.PlayerState.BUFFERING) {
+                handlePossibleSeek(event.target);
               } else {
                 stopTimeCheck();
               }
             },
+            onPlaybackRateChange: handlePlaybackRateChange,
             onError: (event: any) => {
               console.error('[WATCH] ❌ YouTube Player error:', {
                 code: event.data,
@@ -252,7 +473,22 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
         }
       }
     };
-  }, [video, manifest]);
+  }, [video, manifest, progressReady, handlePlaybackRateChange, handlePossibleSeek]);
+
+  useEffect(() => {
+    if (!player || !progressReady) return;
+    const resumeSegment = sortedSegments[nextRequiredSegmentIndex];
+    const resumeFloor = resumeSegment ? resumeSegment.tStartSec : 0;
+    const resumeTarget = Math.max(progressState.lastVerifiedTimeSec || 0, resumeFloor);
+    if (resumeTarget > 0 && Math.abs(resumeTarget - lastValidTimeRef.current) > 0.5) {
+      try {
+        player.seekTo(resumeTarget, true);
+        lastValidTimeRef.current = resumeTarget;
+      } catch (error) {
+        console.warn('[WATCH] Failed to resume to checkpoint:', error);
+      }
+    }
+  }, [player, progressReady, progressState.lastVerifiedTimeSec, nextRequiredSegmentIndex, sortedSegments]);
 
   const getYouTubeErrorMessage = (errorCode: number) => {
     const messages: Record<number, string> = {
@@ -266,6 +502,7 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
   };
 
   const startTimeCheck = (ytPlayer: any) => {
+    if (!ytPlayer) return;
     stopTimeCheck();
     // Check every 500ms for more responsive checkpoint detection
     checkIntervalRef.current = setInterval(() => {
@@ -280,11 +517,134 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
     }
   };
 
+  const enforceSegmentBoundary = (
+    ytPlayer: any,
+    segment: (typeof sortedSegments)[number] | null,
+    currentTime: number
+  ) => {
+    if (!segment) return;
+
+    // Prevent rewinding before the current segment start
+    if (currentTime + 0.25 < segment.tStartSec) {
+      if (!enforcedSegmentRef.current.warningShown) {
+        toast({
+          title: 'Rewind blocked',
+          description: 'Please finish the current section before going back.',
+          variant: 'destructive',
+        });
+        setSegmentNotice('You must finish this checkpoint before rewinding.');
+        setTimeout(() => setSegmentNotice(null), 4000);
+      }
+      enforcedSegmentRef.current = { index: segment.segmentIndex, warningShown: true };
+      ytPlayer.seekTo(Math.max(segment.tStartSec, lastValidTimeRef.current), true);
+      return true;
+    }
+
+    enforcedSegmentRef.current = { index: segment.segmentIndex, warningShown: false };
+    return false;
+  };
+
+  const syncSegmentIndex = useCallback(
+    (index: number) => {
+      setCurrentSegmentIndex(index);
+      const segment = getSegmentByIndex(index);
+      if (!segment) return;
+      const targetTime = Math.max(segment.tStartSec, lastValidTimeRef.current);
+      lastValidTimeRef.current = targetTime;
+      if (player) {
+        enforcedSegmentRef.current = { index: segment.segmentIndex, warningShown: false };
+      }
+    },
+    [getSegmentByIndex, player]
+  );
+
+  const ensureProgressDoc = useCallback(async () => {
+    if (progressDocRef.current) {
+      return progressDocRef.current;
+    }
+    if (!firestore || !user?.uid) {
+      throw new Error('Cannot ensure progress document without auth');
+    }
+    const canonicalRef = doc(firestore, 'progress', buildProgressDocId(user.uid, assignmentId, videoId));
+    await setDoc(
+      canonicalRef,
+      {
+        studentId: user.uid,
+        assignmentId,
+        videoId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    progressDocRef.current = canonicalRef;
+    return canonicalRef;
+  }, [firestore, user?.uid, assignmentId, videoId]);
+
+  const patchProgress = useCallback(
+    async (updates: Record<string, any>) => {
+      try {
+        const ref = await ensureProgressDoc();
+        await updateDoc(
+          ref,
+          {
+            ...updates,
+            updatedAt: serverTimestamp(),
+          }
+        );
+      } catch (error) {
+        console.error('[WATCH] Failed to update progress:', error);
+      }
+    },
+    [ensureProgressDoc]
+  );
+
+  const noteQuestionShown = useCallback((segmentId: string, questionId: string) => {
+    if (!sessionQuestionHistoryRef.current[segmentId]) {
+      sessionQuestionHistoryRef.current[segmentId] = new Set();
+    }
+    sessionQuestionHistoryRef.current[segmentId]!.add(questionId);
+  }, []);
+
+  const completeSegment = async (segmentIndex: number) => {
+    const segment = sortedSegments[segmentIndex];
+    if (!segment) {
+      stopTimeCheck();
+      return;
+    }
+
+    const updates: Record<string, any> = {
+      lastSegmentId: segment.segmentId,
+      lastVerifiedTimeSec: segment.tEndSec,
+    };
+
+    if (!completedSegmentsSet.has(segment.segmentId)) {
+      updates.segmentsCompleted = arrayUnion(segment.segmentId);
+    }
+
+    await patchProgress(updates);
+
+    const nextIndex = segmentIndex + 1;
+    if (nextIndex >= sortedSegments.length) {
+      stopTimeCheck();
+      return;
+    }
+
+    const nextSegment = sortedSegments[nextIndex];
+    if (player && nextSegment) {
+      player.seekTo(nextSegment.tStartSec, true);
+      lastValidTimeRef.current = nextSegment.tStartSec;
+      player.playVideo();
+    }
+    syncSegmentIndex(nextIndex);
+    startTimeCheck(player);
+  };
+
   const checkSegmentCheckpoint = async (ytPlayer: any) => {
-    if (!sortedSegments.length || showQuiz) return;
+    if (!sortedSegments.length || showQuiz || !progressReady) return;
 
     const currentTime = ytPlayer.getCurrentTime();
-    const nextSegment = sortedSegments[currentSegmentIndex];
+    const nextSegment = getSegmentByIndex(currentSegmentIndex);
 
     // Stop if we've reached the end of all segments
     if (!nextSegment) {
@@ -298,6 +658,10 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
     }
 
     // Anti-skip: Detect if student manually seeked forward
+    if (enforceSegmentBoundary(ytPlayer, nextSegment, currentTime)) {
+      return;
+    }
+
     const maxAllowedTime = nextSegment.tEndSec + 2; // Allow 2 second buffer
     if (currentTime > maxAllowedTime && currentTime > lastValidTimeRef.current + 3) {
       console.warn('[WATCH] ⚠️ Skip detected - rewinding to last valid position:', {
@@ -305,6 +669,13 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
         lastValidTime: lastValidTimeRef.current,
         maxAllowed: maxAllowedTime,
       });
+      toast({
+        title: 'Skip blocked',
+        description: 'Please finish the active segment before jumping ahead.',
+        variant: 'destructive',
+      });
+      setSegmentNotice('Skipping ahead is disabled until you finish the current quiz.');
+      setTimeout(() => setSegmentNotice(null), 4000);
       ytPlayer.seekTo(lastValidTimeRef.current, true);
       return;
     }
@@ -337,6 +708,7 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
         totalSegments: sortedSegments.length,
         skippedAhead: segmentIndexToQuiz > currentSegmentIndex,
       });
+      syncSegmentIndex(segmentIndexToQuiz);
       ytPlayer.pauseVideo();
       stopTimeCheck();
       await loadQuestionForSegment(segmentToQuiz.segmentId, segmentIndexToQuiz);
@@ -367,103 +739,91 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
     });
     
     if (questionsSnap && !questionsSnap.empty) {
-      const randomQuestion = questionsSnap.docs[Math.floor(Math.random() * questionsSnap.docs.length)];
-      const questionData = { id: randomQuestion.id, ...randomQuestion.data(), segmentId, segmentIndex };
+      const persistedHistory = progressState.questionHistory[segmentId] || [];
+      const seenIds = new Set<string>(persistedHistory);
+      const sessionHistory = sessionQuestionHistoryRef.current[segmentId];
+      sessionHistory?.forEach(id => seenIds.add(id));
+
+      const availableQuestions = questionsSnap.docs.filter(docSnapshot => !seenIds.has(docSnapshot.id));
+
+      if (availableQuestions.length === 0) {
+        toast({
+          title: 'All questions answered',
+          description: 'This segment has no new questions left. Moving ahead.',
+        });
+        await completeSegment(segmentIndex);
+        return;
+      }
+
+      const randomQuestion = availableQuestions[Math.floor(Math.random() * availableQuestions.length)];
+      const rawData = randomQuestion.data() as Omit<SegmentQuestion, 'id' | 'segmentId' | 'segmentIndex'>;
+      const questionData: SegmentQuestion = {
+        id: randomQuestion.id,
+        segmentId,
+        segmentIndex,
+        stem: rawData.stem,
+        options: Array.isArray(rawData.options) ? rawData.options : [],
+        correctIndex: rawData.correctIndex,
+        rationale: rawData.rationale,
+        difficulty: rawData.difficulty,
+      };
       console.log('[WATCH] Showing quiz:', {
         questionId: randomQuestion.id,
         segmentIndex,
         stem: questionData.stem?.substring(0, 100),
         correctIndex: questionData.correctIndex,
       });
+      noteQuestionShown(segmentId, questionData.id);
       setCurrentQuestion(questionData);
+      syncSegmentIndex(segmentIndex);
       setShowQuiz(true);
     } else {
       console.log('[WATCH] No questions found, auto-advancing to next segment');
-      const nextIndex = segmentIndex + 1;
-      if (nextIndex >= sortedSegments.length) {
-        console.log('[WATCH] Video completed - all segments watched');
-        stopTimeCheck();
-      } else {
-        setCurrentSegmentIndex(nextIndex);
-        player?.playVideo();
-        startTimeCheck(player);
-      }
+      await completeSegment(segmentIndex);
     }
   };
 
   const handleAnswerSubmit = async () => {
-    if (selectedOption === null || !currentQuestion) return;
+    if (selectedOption === null || !currentQuestion || !user) return;
 
     const isCorrect = selectedOption === currentQuestion.correctIndex;
-
     setAnswered(true);
 
-    // Record attempt
     try {
-      await addDoc(collection(firestore!, 'attempts'), {
-        studentId: user?.uid,
-        assignmentId,
-        questionId: currentQuestion.id,
-        segmentId: currentQuestion.segmentId,
-        videoId: videoId,
-        chosenIndex: selectedOption,
-        isCorrect,
-        ts: serverTimestamp(),
+      const token = await user.getIdToken();
+      const currentTime = player?.getCurrentTime() || 0;
+      const duration = player?.getDuration() || 1;
+      const watchPct = Math.round((currentTime / Math.max(duration, 1)) * 100);
+
+      const response = await fetch(`/api/videos/${videoId}/attempts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          assignmentId,
+          questionId: currentQuestion.id,
+          segmentId: currentQuestion.segmentId,
+          segmentIndex: currentQuestion.segmentIndex,
+          chosenIndex: selectedOption,
+          isCorrect,
+          watchPct,
+        }),
       });
 
-      // Update or create progress document
-      if (assignmentId && user?.uid) {
-        const progressQuery = query(
-          collection(firestore!, 'progress'),
-          where('studentId', '==', user.uid),
-          where('assignmentId', '==', assignmentId),
-          where('videoId', '==', videoId)
-        );
-        const { getDocs } = await import('firebase/firestore');
-        const progressSnap = await getDocs(progressQuery);
-        
-        const currentTime = player?.getCurrentTime() || 0;
-        const duration = player?.getDuration() || 1;
-        const watchPct = Math.round((currentTime / duration) * 100);
-        
-        // Calculate score based on all attempts for this video
-        const { query: fbQuery, collection: fbCollection, where: fbWhere, getDocs: fbGetDocs } = await import('firebase/firestore');
-        const attemptsQuery = fbQuery(
-          fbCollection(firestore!, 'attempts'),
-          fbWhere('studentId', '==', user.uid),
-          fbWhere('videoId', '==', videoId)
-        );
-        const attemptsSnap = await fbGetDocs(attemptsQuery);
-        const totalAttempts = attemptsSnap.size;
-        const correctAttempts = attemptsSnap.docs.filter(d => d.data().isCorrect).length;
-        const score = totalAttempts > 0 ? Math.round((correctAttempts / totalAttempts) * 100) : 0;
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.error || 'Failed to record answer');
+      }
 
-        if (progressSnap.empty) {
-          // Create new progress
-          await addDoc(collection(firestore!, 'progress'), {
-            studentId: user.uid,
-            assignmentId,
-            videoId: videoId,
-            watchPct,
-            score,
-            attempts: 1,
-            lastSegmentId: currentQuestion.segmentId,
-            lastActivityAt: serverTimestamp(),
-            completedAt: null,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          // Update existing progress
-          await updateDoc(progressSnap.docs[0].ref, {
-            watchPct,
-            score,
-            attempts: (progressSnap.docs[0].data().attempts || 0) + 1,
-            lastSegmentId: currentQuestion.segmentId,
-            lastActivityAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-        }
+      const payload = await response.json();
+      if (payload?.progressSnapshot) {
+        setProgressState(current => ({
+          ...current,
+          ...payload.progressSnapshot,
+          docId: payload.progressSnapshot.docId ?? current.docId,
+        }));
       }
 
       toast({
@@ -473,42 +833,24 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
       });
     } catch (error) {
       console.error('Error recording attempt:', error);
+      toast({ title: 'Could not record answer', description: String(error), variant: 'destructive' });
+      setAnswered(false);
     }
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     setShowQuiz(false);
     setCurrentQuestion(null);
     setSelectedOption(null);
     setAnswered(false);
-    
-    // Move to next segment
-    const nextIndex = currentSegmentIndex + 1;
-    
+
+    const answeredSegmentIndex = currentQuestion?.segmentIndex ?? currentSegmentIndex;
     console.log('[WATCH] Continuing to next segment:', {
-      currentIndex: currentSegmentIndex,
-      nextIndex,
+      currentIndex: answeredSegmentIndex,
       totalSegments: sortedSegments.length,
     });
-    
-    if (nextIndex >= sortedSegments.length) {
-      console.log('[WATCH] Video completed - all segments finished');
-      stopTimeCheck();
-      return;
-    }
-    
-    setCurrentSegmentIndex(nextIndex);
-    
-    // Update last valid time to the start of next segment
-    const nextSegment = sortedSegments[nextIndex];
-    if (nextSegment && player) {
-      const currentTime = player.getCurrentTime();
-      lastValidTimeRef.current = currentTime;
-      console.log('[WATCH] Updated last valid time:', currentTime);
-    }
-    
-    player?.playVideo();
-    startTimeCheck(player);
+
+    await completeSegment(answeredSegmentIndex);
   };
 
   const videoStatus = (video as any)?.status;
@@ -602,6 +944,13 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
         <>
           <div className="relative w-full bg-gray-900" style={{ paddingTop: '56.25%' }}>
             <div ref={playerRef} className="absolute inset-0" id="youtube-player-container" />
+            {segmentNotice && (
+              <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
+                <div className="rounded-full bg-black/70 px-4 py-1 text-sm text-white">
+                  {segmentNotice}
+                </div>
+              </div>
+            )}
             {!player && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center space-y-2">
@@ -702,4 +1051,8 @@ export default function WatchPage({ params }: { params: Promise<{ videoId: strin
       )}
     </div>
   );
+
+  useEffect(() => {
+    currentSegmentIndexRef.current = currentSegmentIndex;
+  }, [currentSegmentIndex]);
 }
