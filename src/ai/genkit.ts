@@ -1,147 +1,75 @@
 import {genkit, z} from 'genkit';
 import {googleAI} from '@genkit-ai/google-genai';
-
 import {adminFirestore} from '@/lib/firebase/admin';
-import {defaultAiSettings, type AiRuntimeOptions} from '@/lib/schemas';
+import {
+  defaultAiSettings,
+  systemSettingsSchema,
+  type AiRuntimeOptions,
+  type AiSettings,
+} from '@/lib/schemas';
 import {getServerSecret} from '@/lib/secrets';
 
-type SystemAiConfig = {
-  provider: string;
-  model: string;
-  baseUrl?: string;
-  apiKeySecret?: string;
-  apiKey?: string;
-  runtime: AiRuntimeOptions;
-  requestHeaders: Record<string, string>;
-  activePromptId: string | null;
-};
-
-type AiEngine = {
+type AiInitialization = {
   instance: ReturnType<typeof genkit>;
-  settings: SystemAiConfig;
+  config: AiSettings;
   modelName: string;
   runtimeConfig: Record<string, unknown>;
 };
 
 const OPENAI_COMPATIBLE_PROVIDERS = new Set(['openrouter', 'openai']);
+const GOOGLE_PROVIDER_ALIASES = new Set(['google', 'googleai']);
 const OPENROUTER_DEFAULT_HEADERS = Object.freeze({
   'HTTP-Referer': 'https://ilearn.app',
   'X-Title': 'iLearn LMS',
 });
-const MAX_TRANSPORT_RETRIES = 2;
 
-let systemAiConfigPromise: Promise<SystemAiConfig> | null = null;
-let aiEnginePromise: Promise<AiEngine> | null = null;
+function normalizeProvider(provider: string) {
+  const normalized = (provider || '').trim().toLowerCase();
+  if (GOOGLE_PROVIDER_ALIASES.has(normalized)) {
+    return 'googleai';
+  }
+  return normalized;
+}
 
 function isOpenAiCompatible(provider: string) {
   return OPENAI_COMPATIBLE_PROVIDERS.has(provider.toLowerCase());
 }
 
-function sanitizeHeadersRecord(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object') {
-    return {};
-  }
-
-  return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>(
-    (acc, [key, headerValue]) => {
-      if (typeof key !== 'string') {
-        return acc;
-      }
-      if (typeof headerValue !== 'string') {
-        return acc;
-      }
-      const trimmed = headerValue.trim();
-      if (!trimmed) {
-        return acc;
-      }
-      acc[key] = trimmed;
-      return acc;
-    },
-    {},
-  );
-}
-
-function sanitizeRuntime(value: unknown): AiRuntimeOptions {
-  if (!value || typeof value !== 'object') {
-    return {};
-  }
-
-  const runtime = value as Record<string, unknown>;
-  const sanitized: AiRuntimeOptions = {};
-
-  if (typeof runtime.temperature === 'number') sanitized.temperature = runtime.temperature;
-  if (typeof runtime.maxOutputTokens === 'number') sanitized.maxOutputTokens = runtime.maxOutputTokens;
-  if (typeof runtime.topP === 'number') sanitized.topP = runtime.topP;
-  if (typeof runtime.topK === 'number') sanitized.topK = runtime.topK;
-  if (typeof runtime.presencePenalty === 'number') sanitized.presencePenalty = runtime.presencePenalty;
-  if (typeof runtime.frequencyPenalty === 'number') sanitized.frequencyPenalty = runtime.frequencyPenalty;
-  if (Array.isArray(runtime.stopSequences)) {
-    const stops = runtime.stopSequences.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-    if (stops.length > 0) {
-      sanitized.stopSequences = stops;
-    }
-  }
-
-  return sanitized;
-}
-
-function sanitizeBaseUrl(url?: unknown): string | undefined {
-  if (typeof url !== 'string') {
-    return undefined;
-  }
-
-  const trimmed = url.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
+async function fetchAiSettings(): Promise<AiSettings & { apiKey?: string | null }> {
   try {
-    // Validate URL shape without mutating the provided value.
-    const parsed = new URL(trimmed);
-    return parsed.toString();
-  } catch {
-    console.warn('[AI] Ignoring invalid baseUrl from system.ai settings');
-    return undefined;
+    // Prefer granular AI settings document written by the Admin Settings page
+    const aiDoc = await adminFirestore().collection('settings').doc('system.ai').get();
+    let ai: any = { ...defaultAiSettings };
+    if (aiDoc.exists) {
+      const data = aiDoc.data() ?? {};
+      ai = {
+        ...defaultAiSettings,
+        provider: (data.provider as string) ?? defaultAiSettings.provider,
+        model: (data.model as string) ?? defaultAiSettings.model,
+        // Optional runtime overrides
+        runtime: (data.runtime as any) ?? defaultAiSettings.runtime,
+        requestHeaders: (data.requestHeaders as any) ?? defaultAiSettings.requestHeaders,
+        baseUrl: (data.baseUrl as string | undefined),
+        apiKey: (data.apiKey as string | undefined) ?? null,
+      };
+    } else {
+      // Back-compat: fallback to legacy system doc
+      const legacy = await adminFirestore().collection('settings').doc('system').get();
+      const settings = legacy.exists ? systemSettingsSchema.parse(legacy.data() ?? {}) : { ai: defaultAiSettings } as any;
+      ai = settings.ai ?? defaultAiSettings;
+    }
+    try {
+      console.log('[AI] Loaded settings:', {
+        provider: ai.provider,
+        model: ai.model,
+        apiKeyConfigured: Boolean(ai.apiKey),
+      });
+    } catch {}
+    return ai as AiSettings & { apiKey?: string | null };
+  } catch (error) {
+    console.warn('[AI] Falling back to default settings due to Firestore read error:', error);
+    return { ...defaultAiSettings, apiKey: null } as any;
   }
-}
-
-function sanitizeSystemAiConfig(raw: Record<string, unknown>): SystemAiConfig {
-  const provider = typeof raw.provider === 'string' && raw.provider.trim().length > 0
-    ? raw.provider.trim()
-    : defaultAiSettings.provider;
-  const model = typeof raw.model === 'string' && raw.model.trim().length > 0
-    ? raw.model.trim()
-    : defaultAiSettings.model;
-
-  const apiKeySecret = typeof raw.apiKeySecret === 'string' && raw.apiKeySecret.trim().length > 0
-    ? raw.apiKeySecret.trim()
-    : undefined;
-
-  const apiKey = typeof raw.apiKey === 'string' && raw.apiKey.trim().length > 0
-    ? raw.apiKey.trim()
-    : undefined;
-
-  const activePromptId = typeof raw.activePromptId === 'string' && raw.activePromptId.trim().length > 0
-    ? raw.activePromptId.trim()
-    : null;
-
-  return {
-    provider,
-    model,
-    baseUrl: sanitizeBaseUrl(raw.baseUrl),
-    apiKeySecret,
-    apiKey,
-    runtime: sanitizeRuntime(raw.runtime),
-    requestHeaders: sanitizeHeadersRecord(raw.requestHeaders),
-    activePromptId,
-  } satisfies SystemAiConfig;
-}
-
-async function loadSystemAiConfig(forceRefresh = false): Promise<SystemAiConfig> {
-  if (forceRefresh || !systemAiConfigPromise) {
-    systemAiConfigPromise = fetchSystemAiConfig();
-  }
-  return systemAiConfigPromise;
 }
 
 function buildPromptRuntimeConfig(runtime?: AiRuntimeOptions | null) {
@@ -149,18 +77,39 @@ function buildPromptRuntimeConfig(runtime?: AiRuntimeOptions | null) {
     return {};
   }
 
-  const {temperature, maxOutputTokens, topP, topK, stopSequences, presencePenalty, frequencyPenalty} = runtime;
+  const {temperature, maxOutputTokens, topP, topK, stopSequences} = runtime;
   const config: Record<string, unknown> = {};
   if (typeof temperature === 'number') config.temperature = temperature;
   if (typeof maxOutputTokens === 'number') config.maxOutputTokens = maxOutputTokens;
   if (typeof topP === 'number') config.topP = topP;
   if (typeof topK === 'number') config.topK = topK;
-  if (typeof presencePenalty === 'number') config.presencePenalty = presencePenalty;
-  if (typeof frequencyPenalty === 'number') config.frequencyPenalty = frequencyPenalty;
   if (Array.isArray(stopSequences) && stopSequences.length > 0) {
     config.stopSequences = stopSequences;
   }
   return config;
+}
+
+function coalesceBaseUrl(config: AiSettings) {
+  if (config.baseUrl) {
+    return config.baseUrl;
+  }
+  const provider = (config.provider || '').toLowerCase();
+  if (provider === 'openrouter') {
+    return 'https://openrouter.ai/api/v1';
+  }
+  if (provider === 'openai') {
+    return 'https://api.openai.com/v1';
+  }
+  return undefined;
+}
+
+function sanitizeHeaders(base: Record<string, string> = {}) {
+  return Object.entries(base).reduce<Record<string, string>>((acc, [key, value]) => {
+    if (value) {
+      acc[key] = value;
+    }
+    return acc;
+  }, {});
 }
 
 function mapFinishReason(reason?: string) {
@@ -212,78 +161,20 @@ function convertMessages(messages: any[]) {
   });
 }
 
-async function requestWithRetries(url: string, init: RequestInit, provider: string): Promise<Response> {
-  let attempt = 0;
-  let lastError: unknown;
-  while (attempt <= MAX_TRANSPORT_RETRIES) {
-    try {
-      const response = await fetch(url, init);
-      if (response.ok) {
-        return response;
-      }
-
-      const shouldRetry = response.status >= 500 || response.status === 429;
-      const errorText = await response.text().catch(() => response.statusText);
-      lastError = new Error(
-        `[AI] Provider ${provider} request failed (${response.status}): ${errorText}`,
-      );
-
-      if (!shouldRetry || attempt === MAX_TRANSPORT_RETRIES) {
-        throw lastError;
-      }
-    } catch (error) {
-      lastError = error;
-      if (attempt === MAX_TRANSPORT_RETRIES) {
-        break;
-      }
-    }
-
-    const delayMs = 200 * 2 ** attempt;
-    await new Promise(resolve => setTimeout(resolve, delayMs));
-    attempt += 1;
-  }
-
-  throw lastError ?? new Error(`[AI] Provider ${provider} request failed`);
-}
-
-function coalesceBaseUrl(config: SystemAiConfig) {
-  if (config.baseUrl) {
-    return config.baseUrl;
-  }
-  const provider = config.provider.toLowerCase();
-  if (provider === 'openrouter') {
-    return 'https://openrouter.ai/api/v1';
-  }
-  if (provider === 'openai') {
-    return 'https://api.openai.com/v1';
-  }
-  return undefined;
-}
-
-function resolveOpenAiHeaders(config: SystemAiConfig, apiKey: string) {
-  const provider = config.provider.toLowerCase();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${apiKey}`,
-    ...config.requestHeaders,
-  };
-
-  if (provider === 'openrouter') {
-    Object.assign(headers, OPENROUTER_DEFAULT_HEADERS);
-  }
-
-  return headers;
-}
-
 async function registerOpenAiCompatibleModel(
   instance: ReturnType<typeof genkit>,
-  config: SystemAiConfig,
-  apiKey: string,
+  config: AiSettings,
+  apiKey: string
 ) {
   const modelName = config.model;
   const runtimeDefaults = config.runtime ?? {};
-  const baseUrl = coalesceBaseUrl(config) ?? 'https://api.openai.com/v1';
-  const headers = resolveOpenAiHeaders(config, apiKey);
+  const baseUrl = coalesceBaseUrl(config);
+  const headers = sanitizeHeaders({
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    ...(config.provider.toLowerCase() === 'openrouter' ? OPENROUTER_DEFAULT_HEADERS : {}),
+    ...config.requestHeaders,
+  });
 
   instance.defineModel(
     {
@@ -325,15 +216,18 @@ async function registerOpenAiCompatibleModel(
         payload.frequency_penalty = mergedRuntime.frequencyPenalty;
       }
 
-      const response = await requestWithRetries(
-        `${baseUrl.replace(/\/$/, '')}/chat/completions`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(payload),
-        },
-        config.provider,
-      );
+      const response = await fetch(`${baseUrl ?? 'https://api.openai.com/v1'}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `[AI] Provider ${config.provider} request failed (${response.status}): ${errorText}`
+        );
+      }
 
       const data: any = await response.json();
       const choice = data.choices?.[0];
@@ -362,86 +256,80 @@ async function registerOpenAiCompatibleModel(
           totalTokens: data.usage?.total_tokens,
         },
       };
-    },
-  );
-}
-
-async function fetchSystemAiConfig(): Promise<SystemAiConfig> {
-  try {
-    const doc = await adminFirestore().collection('settings').doc('system.ai').get();
-    if (!doc.exists) {
-      return {
-        provider: defaultAiSettings.provider,
-        model: defaultAiSettings.model,
-        runtime: defaultAiSettings.runtime,
-        requestHeaders: defaultAiSettings.requestHeaders,
-        baseUrl: undefined,
-        apiKeySecret: undefined,
-        apiKey: undefined,
-        activePromptId: null,
-      } satisfies SystemAiConfig;
     }
+  );
 
-    const raw = doc.data() ?? {};
-    return sanitizeSystemAiConfig(raw);
-  } catch (error) {
-    console.warn('[AI] Falling back to default settings due to Firestore read error:', error);
-    return {
-      provider: defaultAiSettings.provider,
-      model: defaultAiSettings.model,
-      runtime: defaultAiSettings.runtime,
-      requestHeaders: defaultAiSettings.requestHeaders,
-      baseUrl: undefined,
-      apiKeySecret: undefined,
-      apiKey: undefined,
-      activePromptId: null,
-    } satisfies SystemAiConfig;
-  }
+  return modelName;
 }
 
-async function createAiEngine(forceRefreshConfig = false): Promise<AiEngine> {
-  const settings = await loadSystemAiConfig(forceRefreshConfig);
-  const normalizedProvider = settings.provider.toLowerCase();
-  const runtimeConfig = Object.freeze(buildPromptRuntimeConfig(settings.runtime));
+async function initializeAi(): Promise<AiInitialization> {
+  const config = await fetchAiSettings();
+  const runtimeConfig = Object.freeze(buildPromptRuntimeConfig(config.runtime));
 
-  console.info('ai.engine.configuration', {
-    provider: normalizedProvider,
-    model: settings.model,
-    promptId: settings.activePromptId,
-  });
+  const requestedProvider = config.provider ?? '';
+  const provider = normalizeProvider(requestedProvider);
 
-  if (normalizedProvider === 'googleai' || normalizedProvider === 'google' || normalizedProvider === 'gemini') {
-    const apiKey = settings.apiKey ?? (settings.apiKeySecret ? getServerSecret(settings.apiKeySecret) : undefined);
+  if (provider === 'googleai') {
+    // Prefer explicit API key from settings; else allow secret indirection
+    const explicitKeyRaw = (config as any).apiKey as unknown;
+    const explicitKey = typeof explicitKeyRaw === 'string' && explicitKeyRaw.trim().length > 0
+      ? explicitKeyRaw.trim()
+      : undefined;
+    const secretNameRaw = (config as any).apiKeySecret as unknown;
+    const secretName = typeof secretNameRaw === 'string' && secretNameRaw.trim().length > 0
+      ? secretNameRaw.trim()
+      : undefined;
+    const apiKey = explicitKey ?? (secretName ? getServerSecret(secretName) : undefined);
+    // Normalize model id for Google provider, preserving explicit choices
+    const rawModel = (config.model || '').trim();
+    const finalModel = rawModel.startsWith('googleai/') ? rawModel : `googleai/${rawModel}`;
+    try {
+      console.log('[AI] Initializing GoogleAI provider', {
+        provider: requestedProvider,
+        model: finalModel,
+        hasApiKey: Boolean(apiKey),
+        keySource: explicitKey ? 'settings.apiKey' : (secretName ? `secret:${secretName}` : 'none'),
+        baseUrl: config.baseUrl ?? null,
+        apiKeyMask: apiKey ? `${apiKey.slice(0, 6)}…${apiKey.slice(-4)} (len=${apiKey.length})` : null,
+      });
+    } catch {}
     const plugins = [
       googleAI({
         apiKey,
-        baseUrl: settings.baseUrl,
+        baseUrl: config.baseUrl,
       }),
     ];
 
     const instance = genkit({
       plugins,
-      model: settings.model,
+      model: finalModel,
     });
 
-    return {instance, settings, modelName: settings.model, runtimeConfig};
+    return {instance, config, modelName: finalModel, runtimeConfig};
   }
 
-  if (isOpenAiCompatible(normalizedProvider)) {
-    let apiKey = settings.apiKey;
-    if (!apiKey) {
-      const secretName = settings.apiKeySecret ?? 'openrouter/apiKey';
-      apiKey = getServerSecret(secretName);
+  if (isOpenAiCompatible(provider)) {
+    if (!config.apiKeySecret) {
+      throw new Error('AI provider configuration requires an apiKeySecret value.');
     }
+    const apiKey = getServerSecret(config.apiKeySecret);
+    try {
+      console.log('[AI] Initializing OpenAI-compatible provider', {
+        provider: requestedProvider,
+        model: config.model,
+        hasApiKey: Boolean(apiKey),
+        baseUrl: coalesceBaseUrl(config) ?? null,
+      });
+    } catch {}
     const instance = genkit({
-      model: settings.model,
+      model: config.model,
     });
-    await registerOpenAiCompatibleModel(instance, settings, apiKey);
-    return {instance, settings, modelName: settings.model, runtimeConfig};
+    await registerOpenAiCompatibleModel(instance, config, apiKey);
+    return {instance, config, modelName: config.model, runtimeConfig};
   }
 
   console.warn(
-    `[AI] Unknown provider "${settings.provider}". Falling back to Google Gemini with default settings.`,
+    `[AI] Unknown provider "${requestedProvider}". Falling back to Google Gemini with default settings.`
   );
 
   const fallbackInstance = genkit({
@@ -451,41 +339,14 @@ async function createAiEngine(forceRefreshConfig = false): Promise<AiEngine> {
 
   return {
     instance: fallbackInstance,
-    settings: {
-      provider: defaultAiSettings.provider,
-      model: defaultAiSettings.model,
-      runtime: defaultAiSettings.runtime,
-      requestHeaders: defaultAiSettings.requestHeaders,
-      baseUrl: undefined,
-      apiKeySecret: undefined,
-      apiKey: undefined,
-      activePromptId: null,
-    },
+    config: defaultAiSettings,
     modelName: defaultAiSettings.model,
     runtimeConfig: Object.freeze(buildPromptRuntimeConfig(defaultAiSettings.runtime)),
-  } satisfies AiEngine;
+  };
 }
 
-type GetAiEngineOptions = {
-  bypassCache?: boolean;
-  refresh?: boolean;
-};
+const initialization = initializeAi();
+const {instance: ai, config: aiSettings, modelName: aiModelName, runtimeConfig: aiRuntimeConfig} =
+  await initialization;
 
-export async function getAiEngine(options?: GetAiEngineOptions): Promise<AiEngine> {
-  if (options?.bypassCache) {
-    return createAiEngine(options?.refresh ?? false);
-  }
-
-  if (!aiEnginePromise || options?.refresh) {
-    aiEnginePromise = createAiEngine(options?.refresh ?? false);
-  }
-
-  return aiEnginePromise;
-}
-
-export function invalidateAiEngineCache() {
-  aiEnginePromise = null;
-  systemAiConfigPromise = null;
-}
-
-export type {AiEngine, SystemAiConfig};
+export {ai, aiModelName, aiRuntimeConfig, aiSettings};

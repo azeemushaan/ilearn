@@ -1,9 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { invalidateAiEngineCache } from '@/ai/genkit';
-import { runAiConnectionTest } from '@/lib/ai/test-connection';
-import { updateSystemAiSettings, updateSystemSettings, writeAudit } from '@/lib/firestore/admin-ops';
+import { redirect } from 'next/navigation';
+import { updateSystemAiSettings, updateSystemSettings } from '@/lib/firestore/admin-ops';
 import { requireAdmin } from '@/lib/auth/server';
 
 export async function updateSettingsAction(formData: FormData) {
@@ -11,12 +10,48 @@ export async function updateSettingsAction(formData: FormData) {
   const manualPaymentsEnabled = formData.get('manualPaymentsEnabled') === 'on';
   const supportEmail = String(formData.get('supportEmail'));
   const logoUrl = formData.get('logoUrl') ? String(formData.get('logoUrl')) : undefined;
+  const primaryColor = formData.get('primaryColor') ? String(formData.get('primaryColor')) : undefined;
+  const secondaryColor = formData.get('secondaryColor') ? String(formData.get('secondaryColor')) : undefined;
+  
+  // Handle file upload
+  const logoFile = formData.get('logoFile') as File | null;
+  let uploadedLogoUrl = logoUrl;
+  
+  if (logoFile && logoFile.size > 0) {
+    try {
+      // Upload file to Cloud Storage
+      const { adminStorage } = await import('@/lib/firebase/admin');
+      const bucket = adminStorage().bucket();
+      const fileName = `logos/${Date.now()}-${logoFile.name}`;
+      const file = bucket.file(fileName);
+      
+      const buffer = Buffer.from(await logoFile.arrayBuffer());
+      await file.save(buffer, {
+        metadata: {
+          contentType: logoFile.type,
+        }
+      });
+      
+      // Make file publicly accessible
+      await file.makePublic();
+      uploadedLogoUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+    } catch (error) {
+      console.error('Failed to upload logo:', error);
+      // Continue with existing logoUrl if upload fails
+    }
+  }
+  
   await updateSystemSettings({
     manualPaymentsEnabled,
     supportEmail,
-    branding: { logoUrl },
+    branding: { 
+      logoUrl: uploadedLogoUrl,
+      primaryColor,
+      secondaryColor,
+    },
   }, admin.uid);
   revalidatePath('/admin/dashboard/settings');
+  redirect('/admin/dashboard/settings?saved=general');
 }
 
 export async function updateAiSettingsAction(formData: FormData) {
@@ -46,67 +81,7 @@ export async function updateAiSettingsAction(formData: FormData) {
   }
 
   await updateSystemAiSettings(updates, admin.uid);
-  invalidateAiEngineCache();
   revalidatePath('/admin/dashboard/settings');
   revalidatePath('/admin/dashboard/settings/prompts');
-}
-
-export type TestAiConnectionState = {
-  status: 'idle' | 'success' | 'error';
-  message?: string;
-  provider?: string;
-  model?: string;
-  latencyMs?: number;
-  reply?: string;
-};
-
-export const initialTestAiConnectionState: TestAiConnectionState = Object.freeze({ status: 'idle' } satisfies TestAiConnectionState);
-
-export async function testAiConnectionAction(
-  _prevState: TestAiConnectionState,
-  _formData: FormData,
-): Promise<TestAiConnectionState> {
-  const admin = await requireAdmin();
-
-  try {
-    const result = await runAiConnectionTest();
-    await writeAudit({
-      actorId: admin.uid,
-      action: 'settings.ai.testConnection',
-      target: { collection: 'settings', id: 'system.ai' },
-      meta: {
-        provider: result.provider,
-        model: result.model,
-        latencyMs: result.latencyMs,
-      },
-    });
-
-    return {
-      status: 'success',
-      provider: result.provider,
-      model: result.model,
-      latencyMs: result.latencyMs,
-      reply: result.reply,
-      message: `Connected to ${result.provider} (${result.model}) in ${result.latencyMs.toFixed(0)}ms.`,
-    } satisfies TestAiConnectionState;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to test AI settings.';
-    console.error('settings.ai.testConnectionFailed', {
-      adminId: admin.uid,
-      message,
-      cause: error instanceof Error ? { name: error.name, stack: error.stack } : { value: error },
-    });
-
-    await writeAudit({
-      actorId: admin.uid,
-      action: 'settings.ai.testConnectionFailed',
-      target: { collection: 'settings', id: 'system.ai' },
-      meta: { error: message },
-    });
-
-    return {
-      status: 'error',
-      message,
-    } satisfies TestAiConnectionState;
-  }
+  redirect('/admin/dashboard/settings?saved=ai');
 }

@@ -2,7 +2,29 @@
 
 ## Executive Summary
 
-This report documents a comprehensive audit of the iLearn (ER21) admin and billing platform, identifying critical gaps, implementing missing features, and ensuring production readiness.
+This report documents the complete implementation history of iLearn (ER21), from initial admin/billing platform through the LMS features and the recent Phase 3 refactor to manual video processing.
+
+## Phase 3 Refactor: Manual Processing System (November 2025)
+
+### Critical Issues Identified
+1. **Auto-processing with Placeholder Data**: Videos processed without captions resulted in placeholder text ("Segment at 3:45 - 4:30") being sent to AI, causing generic/irrelevant questions across all videos
+2. **No Teacher Control**: Teachers had no control over processing steps or caption sources
+3. **No Ownership Verification**: OAuth could fetch captions from videos not owned by teacher
+4. **No Credit System**: AI transcription had no cost tracking or billing
+
+### Solutions Implemented
+1. **Removed All Auto-Processing**: Playlist ingestion now only fetches metadata, never triggers video processing
+2. **Explicit Step-by-Step Processing**: Four separate API endpoints for each step with manual teacher control
+3. **YouTube OAuth Integration**: One-time connection, multi-channel support, ownership verification with 24h caching
+4. **Credit Management**: Reserve/consume/refund flow with 1 credit = 1 minute pricing
+5. **Strict Validation**: MCQ generation now rejects placeholder text and insufficient content
+6. **Comprehensive Logging**: Every step logged with actor, duration, credits, and errors
+
+### Architecture Changes
+- New collections: `ownership_cache`, `batch_jobs`, `coach_billing`, `youtube_connections`, `credit_transactions`, `processing_logs`, `notifications`
+- New API routes: 15+ endpoints for OAuth, ownership, processing steps, and credit management
+- New helper libraries: `youtube/oauth.ts`, `youtube/ownership.ts`, `youtube/captions.ts`, `credits/manager.ts`
+- Updated schemas: Extended video, playlist, and coach schemas with processing metadata
 
 ---
 
@@ -274,7 +296,7 @@ This report documents a comprehensive audit of the iLearn (ER21) admin and billi
    - Session cookie validation
 
 4. **Custom Claims**
-   - `role`: 'admin' | 'teacher' | 'student'
+   - `role`: 'admin' | 'coach' | 'student'
    - `coachId`: Multi-tenant isolation
 
 ---

@@ -118,11 +118,55 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    match /teacher_subscriptions/{id} {
+    match /coach_subscriptions/{id} {
       allow get: if isCoachScoped(resource.data.coachId) && isCoachMember(resource.data.coachId);
       allow list: if false;
       allow create: if isCoachScoped(request.resource.data.coachId) && isCoachMember(request.resource.data.coachId);
       allow update, delete: if false;
+    }
+
+    // Phase 3: Manual Processing Collections
+    match /notifications/{notificationId} {
+      allow get: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow list: if request.auth != null &&
+                     request.query.limit <= 20;
+      allow create: if false; // Only backend creates notifications
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid; // Allow marking as read
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    match /ownership_cache/{videoId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Only backend writes
+    }
+
+    match /batch_jobs/{jobId} {
+      allow read: if request.auth != null && (
+        isAdmin() || resource.data.coachId == request.auth.token.coachId
+      );
+      allow list: if request.auth != null;
+      allow create, update: if false; // Only via API
+      allow delete: if false;
+    }
+
+    match /coach_billing/{coachId} {
+      allow read: if request.auth != null && (
+        isAdmin() || request.auth.token.coachId == coachId
+      );
+      allow write: if false; // Only via API
+    }
+
+    match /credit_transactions/{transactionId} {
+      allow read: if request.auth != null && (
+        isAdmin() || resource.data.coachId == request.auth.token.coachId
+      );
+      allow list: if request.auth != null;
+      allow write: if false; // Only via API
+    }
+
+    match /youtube_connections/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false; // Only via API
     }
   }
 

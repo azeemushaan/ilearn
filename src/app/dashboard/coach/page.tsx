@@ -6,6 +6,7 @@ import { useFirestore, useCollection, useMemoFirebase, useFirebaseAuth, useDoc }
 import { collection, query, where, doc } from 'firebase/firestore';
 import { PlusCircle, Users, Video, BarChart } from 'lucide-react';
 import Link from 'next/link';
+import { NotificationBell } from '@/components/ui/notification-bell';
 
 export default function CoachDashboard() {
   const firestore = useFirestore();
@@ -56,12 +57,15 @@ export default function CoachDashboard() {
       <header className="p-4 md:p-6 border-b">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-headline font-bold">Coach Dashboard</h1>
-          <Button asChild>
-            <Link href="/dashboard/playlists">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              Add Playlist
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <Button asChild>
+              <Link href="/dashboard/playlists">
+                <PlusCircle className="mr-2 h-4 w-4" />
+                Add Playlist
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
       <main className="flex-1 p-4 md:p-6 space-y-6">
@@ -128,6 +132,9 @@ export default function CoachDashboard() {
               </Button>
               <Button asChild className="w-full" variant="outline">
                 <Link href="/dashboard/manage-students">Manage Students</Link>
+              </Button>
+              <Button asChild className="w-full" variant="outline">
+                <Link href="/dashboard/coach/assignments">Manage Assignments</Link>
               </Button>
               <Button asChild className="w-full" variant="outline">
                 <Link href="/dashboard/analytics">View Analytics</Link>

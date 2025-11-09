@@ -5,18 +5,26 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SubmitManualPaymentForm } from '@/components/dashboard/manual-payment-form';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
+
 async function getCoachData(coachId: string) {
   const [subscriptionsSnap, paymentsSnap] = await Promise.all([
     adminFirestore().collection('subscriptions').where('coachId', '==', coachId).orderBy('createdAt', 'desc').limit(3).get(),
     adminFirestore().collection('payments').where('coachId', '==', coachId).orderBy('createdAt', 'desc').limit(10).get(),
   ]);
-  const subscriptions = subscriptionsSnap.docs.map((doc) => subscriptionSchema.parse({ ...doc.data(), id: doc.id }));
-  const payments = paymentsSnap.docs.map((doc) => paymentSchema.parse({ ...doc.data(), id: doc.id }));
+  const subscriptions = subscriptionsSnap.docs.map((doc) => ({
+    ...subscriptionSchema.parse(doc.data()),
+    id: doc.id,
+  }));
+  const payments = paymentsSnap.docs.map((doc) => ({
+    ...paymentSchema.parse(doc.data()),
+    id: doc.id,
+  }));
   return { subscriptions, payments };
 }
 
 export default async function BillingPage() {
-  const user = await requireRole(['admin', 'teacher']);
+  const user = await requireRole(['admin', 'coach']);
   if (!user.coachId) throw new Error('Coach required');
   const { subscriptions, payments } = await getCoachData(user.coachId);
   const activeSubscription = subscriptions.find((subscription) => subscription.status === 'active') ?? subscriptions[0] ?? null;
@@ -35,10 +43,10 @@ export default async function BillingPage() {
           <CardContent>
             {activeSubscription ? (
               <div className="space-y-2 text-sm">
-                <div className="font-semibold capitalize">{activeSubscription.tier}</div>
-                <div>Seat limit: {activeSubscription.seatLimit}</div>
+                <div className="font-semibold">Plan: {activeSubscription.planId}</div>
+                <div>Max Students: {activeSubscription.maxStudents}</div>
                 <div>Renewal date: {formatDate(activeSubscription.currentPeriodEnd)}</div>
-                <div>Status: {activeSubscription.status}</div>
+                <div>Status: <span className="capitalize">{activeSubscription.status.replace('_', ' ')}</span></div>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No active subscription found.</p>

@@ -1,4 +1,5 @@
 import { AuditTable } from '@/components/admin/audit-table';
+export const dynamic = 'force-dynamic';
 import { listAudit } from '@/lib/firestore/admin-ops';
 
 export default async function AuditPage() {

@@ -35,10 +35,16 @@ export function getAdminApp() {
       privateKey: serviceAccount.private_key,
     };
 
+    // Firebase Storage can use either the new .firebasestorage.app domain or legacy .appspot.com
+    // Both point to the same bucket, but Admin SDK works with both formats
+    const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || `${config.projectId}.appspot.com`;
+    
     app = initializeApp({
       credential: cert(config),
-      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+      storageBucket,
     });
+    
+    console.log('[FIREBASE] Storage bucket configured:', storageBucket);
 
     console.log('[FIREBASE] Initialized with service account key file');
     return app;

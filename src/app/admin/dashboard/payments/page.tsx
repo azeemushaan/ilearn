@@ -1,4 +1,5 @@
 import { PaymentsTable } from '@/components/admin/payments-table';
+export const dynamic = 'force-dynamic';
 import { listCoaches, listPayments } from '@/lib/firestore/admin-ops';
 
 export default async function PaymentsPage() {

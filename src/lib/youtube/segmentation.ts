@@ -161,12 +161,19 @@ export function segmentTranscript(
     preferredDuration = 45,
   } = options;
 
-  if (cues.length === 0) return [];
+  console.log('[Segmentation] Starting with cues:', cues.length, 'options:', { minDuration, maxDuration, preferredDuration });
+
+  if (cues.length === 0) {
+    console.log('[Segmentation] No cues provided');
+    return [];
+  }
 
   const segments: TranscriptSegment[] = [];
   let currentSegmentStart = cues[0].startTime;
   let currentText: string[] = [];
   let lastCueEnd = cues[0].startTime;
+
+  console.log('[Segmentation] Starting segmentation loop');
 
   for (let i = 0; i < cues.length; i++) {
     const cue = cues[i];
@@ -176,15 +183,21 @@ export function segmentTranscript(
     lastCueEnd = cue.endTime;
 
     // Check if we should create a segment
-    const shouldSegment = 
-      duration >= preferredDuration || // Reached preferred duration
-      (duration >= minDuration && isAtSentenceBoundary(cue.text)) || // At natural boundary
-      duration >= maxDuration || // Exceeded max duration
-      i === cues.length - 1; // Last cue
+    const atPreferredDuration = duration >= preferredDuration;
+    const atSentenceBoundary = isAtSentenceBoundary(cue.text);
+    const atMinWithBoundary = duration >= minDuration && atSentenceBoundary;
+    const exceededMaxDuration = duration >= maxDuration;
+    const isLastCue = i === cues.length - 1;
+
+    const shouldSegment = atPreferredDuration || atMinWithBoundary || exceededMaxDuration || isLastCue;
+
+    console.log(`[Segmentation] Cue ${i}: duration=${duration.toFixed(1)}s, shouldSegment=${shouldSegment} (${atPreferredDuration ? 'preferred' : atMinWithBoundary ? 'boundary' : exceededMaxDuration ? 'max' : isLastCue ? 'last' : 'no'})`);
 
     if (shouldSegment) {
       const textChunk = currentText.join(' ').trim();
-      
+
+      console.log(`[Segmentation] Creating segment: start=${currentSegmentStart}, end=${lastCueEnd}, text="${textChunk.substring(0, 50)}..."`);
+
       segments.push({
         tStartSec: Math.floor(currentSegmentStart),
         tEndSec: Math.ceil(lastCueEnd),
@@ -200,6 +213,7 @@ export function segmentTranscript(
     }
   }
 
+  console.log('[Segmentation] Completed with segments:', segments.length);
   return segments;
 }
 
@@ -245,29 +259,16 @@ export function segmentByChapters(
 
 /**
  * Create evenly-spaced segments when no transcript/chapters available
- * Last resort fallback
+ * DEPRECATED: This function should not be used as it creates placeholder text.
+ * Proper captions must be fetched first.
  */
 export function createUniformSegments(
   videoDuration: number,
   segmentDuration: number = 45
 ): TranscriptSegment[] {
-  const segments: TranscriptSegment[] = [];
-  let currentStart = 0;
-
-  while (currentStart < videoDuration) {
-    const currentEnd = Math.min(currentStart + segmentDuration, videoDuration);
-    
-    segments.push({
-      tStartSec: Math.floor(currentStart),
-      tEndSec: Math.ceil(currentEnd),
-      textChunk: `Segment at ${formatTime(currentStart)} - ${formatTime(currentEnd)}`,
-      textChunkHash: hashText(`${currentStart}-${currentEnd}`),
-    });
-
-    currentStart = currentEnd;
-  }
-
-  return segments;
+  throw new Error(
+    'Cannot segment without captions. Please fetch captions first via OAuth, upload SRT, or use AI transcription.'
+  );
 }
 
 /**

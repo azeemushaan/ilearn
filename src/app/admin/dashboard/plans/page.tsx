@@ -1,4 +1,5 @@
 import { PlansManager } from '@/components/admin/plans-manager';
+export const dynamic = 'force-dynamic';
 import { listPlans } from '@/lib/firestore/admin-ops';
 
 export default async function PlansPage() {

@@ -20,3 +20,30 @@ export function formatCurrency(amount: number, currency: 'PKR' | 'USD') {
 }
 
 export const KARACHI_TZ = 'Asia/Karachi';
+
+/**
+ * Remove undefined values from objects recursively
+ * Firestore doesn't allow undefined values
+ */
+export function cleanFirestoreData(obj: any): any {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(cleanFirestoreData);
+  }
+
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const cleanedValue = cleanFirestoreData(value);
+      if (cleanedValue !== undefined) {
+        cleaned[key] = cleanedValue;
+      }
+    }
+    return cleaned;
+  }
+
+  return obj;
+}

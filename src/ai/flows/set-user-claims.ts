@@ -13,7 +13,7 @@ import { adminAuth } from '@/lib/firebase/admin';
 const SetUserClaimsInputSchema = z.object({
   uid: z.string().describe('The user ID (uid) to set claims for.'),
   claims: z.object({
-    role: z.string().describe('The role to assign to the user (e.g., "admin", "teacher").'),
+    role: z.string().describe('The role to assign to the user (e.g., "admin", "coach").'),
     coachId: z.string().optional().describe('The coach ID associated with the user.'),
   }),
 });

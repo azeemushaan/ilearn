@@ -165,12 +165,12 @@ async function seedDatabase() {
     console.log(`  ✓ Created coach user (${coachUser.uid})`);
   }
 
-  await auth.setCustomUserClaims(coachUser.uid, { role: 'teacher', coachId: coachRef.id });
+  await auth.setCustomUserClaims(coachUser.uid, { role: 'coach', coachId: coachRef.id });
   console.log('  ✓ Set coach custom claims');
 
   await firestore.collection('users').doc(coachUser.uid).set({
     coachId: coachRef.id,
-    role: 'teacher',
+    role: 'coach',
     profile: {
       name: 'Demo Coach',
       email: 'coach@demo.com',

@@ -3,6 +3,8 @@ import { adminFirestore } from '@/lib/firebase/admin';
 import { userSchema, type CoachUser } from '@/lib/schemas';
 import { listCoaches } from '@/lib/firestore/admin-ops';
 
+export const dynamic = 'force-dynamic';
+
 async function listUsers(): Promise<CoachUser[]> {
   const snapshot = await adminFirestore().collection('users').limit(500).get();
   return snapshot.docs.map((doc) => ({ ...userSchema.parse(doc.data()), id: doc.id }));

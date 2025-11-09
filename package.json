@@ -15,7 +15,8 @@
     "create-admin": "tsx scripts/create-admin.ts",
     "seed": "tsx scripts/seed-database.ts",
     "seed-videos": "tsx scripts/seed-demo-videos.ts",
-    "seed-complete": "tsx scripts/seed-complete-flow.ts"
+    "seed-complete": "tsx scripts/seed-complete-flow.ts",
+    "migrate:phase3": "tsx scripts/migrate-to-manual-processing.ts"
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.20.0",
@@ -50,8 +51,9 @@
     "firebase": "^11.9.1",
     "firebase-admin": "^12.7.0",
     "genkit": "^1.20.0",
+    "googleapis": "^144.0.0",
     "lucide-react": "^0.475.0",
-    "next": "15.3.3",
+    "next": "^15.5.6",
     "patch-package": "^8.0.0",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
@@ -69,13 +71,13 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "@vitest/coverage-v8": "^2.1.8",
+    "@vitest/coverage-v8": "^4.0.7",
     "genkit-cli": "^1.20.0",
-    "happy-dom": "^15.11.6",
+    "happy-dom": "^20.0.10",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.20.6",
     "typescript": "^5",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.4"
   }
 }

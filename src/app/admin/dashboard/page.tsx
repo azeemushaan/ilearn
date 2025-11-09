@@ -1,4 +1,5 @@
 import { listCoaches, listInvoices, listPayments, listSubscriptions } from '@/lib/firestore/admin-ops';
+export const dynamic = 'force-dynamic';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency } from '@/lib/utils';
 import { PaymentsTable, InvoicesTable } from './overview-tables';

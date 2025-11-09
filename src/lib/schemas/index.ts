@@ -80,24 +80,13 @@ export type Plan = z.infer<typeof planSchema> & { id: string };
 
 export const aiProviderSchema = z.enum(['google', 'openai', 'anthropic']);
 
-export const aiSettingsSchema = z.object({
-  provider: aiProviderSchema.default('google'),
-  model: z.string().min(1),
-  apiKey: z.string().nullish(),
-  apiKeySecret: z.string().nullish(),
-  activePromptId: z.string().nullish(),
-  updatedAt: nullableTimestamp,
-});
-
 export type AiProvider = z.infer<typeof aiProviderSchema>;
-export type AiSettings = z.infer<typeof aiSettingsSchema>;
 
 export const promptTemplateSchema = z.object({
   name: z.string().min(1),
   description: z.string().nullish(),
   content: z.string().min(1),
   active: z.boolean().default(false),
-  version: z.number().int().min(1).default(1),
   createdAt: nullableTimestamp,
   updatedAt: nullableTimestamp,
 });
@@ -163,14 +152,14 @@ export const auditSchema = z.object({
 
 export type AuditEvent = z.infer<typeof auditSchema> & { id: string };
 
-export const teacherSubscriptionSchema = z.object({
+export const coachSubscriptionSchema = z.object({
   userId: z.string().min(1),
   planRef: z.string().min(1),
   createdAt: nullableTimestamp,
   updatedAt: nullableTimestamp,
 });
 
-export type LegacyTeacherSubscription = z.infer<typeof teacherSubscriptionSchema> & { id: string };
+export type LegacycoachSubscription = z.infer<typeof coachSubscriptionSchema> & { id: string };
 
 export const createTimestamp = () => new Date();
 
@@ -204,7 +193,6 @@ export const aiSettingsSchema = z
     model: z.string().min(1).default(defaultAiSettings.model),
     baseUrl: z.string().url().optional(),
     apiKeySecret: z.string().min(1).optional(),
-    apiKey: z.string().min(1).optional(),
     runtime: aiRuntimeSchema.default({}),
     requestHeaders: z.record(z.string()).default({}),
   })
@@ -215,7 +203,9 @@ export type AiSettings = z.infer<typeof aiSettingsSchema>;
 
 export const systemBrandingSchema = z
   .object({
-    logoUrl: z.string().url().nullish(),
+    logoUrl: z.string().url().nullish().or(z.literal('')),
+    primaryColor: z.string().regex(/^#([0-9a-fA-F]{3}){1,2}$/).nullish().or(z.literal('')),
+    secondaryColor: z.string().regex(/^#([0-9a-fA-F]{3}){1,2}$/).nullish().or(z.literal('')),
   })
   .default({});
 
@@ -238,15 +228,6 @@ export const systemSettingsUpdateSchema = systemSettingsBaseSchema.partial();
 export type SystemSettings = z.infer<typeof systemSettingsSchema>;
 
 // Core LMS schemas for YouTube playlist assignments
-
-const transcriptMetadataSchema = z.object({
-  storagePath: z.string().min(1),
-  format: z.enum(['srt', 'vtt']),
-  originalFilename: z.string().optional(),
-  cueCount: z.number().int().min(0).optional(),
-  uploadedAt: nullableTimestamp,
-  updatedAt: nullableTimestamp,
-});
 
 export const playlistSchema = z.object({
   coachId: z.string().min(1),
@@ -274,7 +255,6 @@ export const videoSchema = z.object({
   chaptersOnly: z.boolean().default(false),
   status: z.enum(['pending', 'processing', 'ready', 'error']).default('pending'),
   segmentCount: z.number().int().min(0).default(0),
-  transcript: transcriptMetadataSchema.nullish(),
   createdAt: nullableTimestamp,
   updatedAt: nullableTimestamp,
 });
@@ -371,3 +351,199 @@ export const invitationSchema = z.object({
 });
 
 export type Invitation = z.infer<typeof invitationSchema> & { id: string };
+
+// Video manifest schemas for cached segment/question data
+export const manifestSegmentSchema = z.object({
+  segmentId: z.string(),
+  segmentIndex: z.number().int().min(0),
+  tStartSec: z.number().min(0),
+  tEndSec: z.number().min(0),
+  durationSec: z.number().min(0),
+  questionIds: z.array(z.string()),
+  difficulty: z.enum(['easy', 'medium', 'hard']).optional(),
+});
+
+export const videoManifestSchema = z.object({
+  videoId: z.string(),
+  youtubeVideoId: z.string(),
+  title: z.string(),
+  duration: z.number().int().min(0),
+  status: z.enum(['ready', 'processing', 'error']),
+  hasCaptions: z.boolean(),
+  chaptersOnly: z.boolean(),
+  segments: z.array(manifestSegmentSchema),
+  totalSegments: z.number().int().min(0),
+  totalQuestions: z.number().int().min(0),
+  generatedAt: z.string(), // ISO timestamp
+  version: z.string().default('1.0'),
+});
+
+export type ManifestSegment = z.infer<typeof manifestSegmentSchema>;
+export type VideoManifest = z.infer<typeof videoManifestSchema>;
+
+// Manual Processing System Schemas
+
+// Ownership cache for YouTube channel verification
+export const ownershipCacheSchema = z.object({
+  videoId: z.string().min(1),
+  channelId: z.string().min(1).optional(),
+  owned: z.boolean(),
+  verifiedAt: nullableTimestamp,
+  userId: z.string().min(1), // Teacher who connected the channel
+  ttlHours: z.number().int().default(24),
+});
+
+export type OwnershipCache = z.infer<typeof ownershipCacheSchema> & { id: string };
+
+// Batch job tracking for processing operations
+export const batchJobSchema = z.object({
+  type: z.enum(['captions', 'segment', 'mcq', 'manifest', 'full']),
+  videoIds: z.array(z.string()).min(1),
+  coachId: z.string().min(1),
+  createdBy: z.string().min(1), // Teacher userId
+  config: z.object({
+    captionSource: z.enum(['oauth', 'srt', 'ai']).optional(),
+    captionLanguage: z.string().optional(),
+    mcqLanguage: z.string().optional(),
+    engine: z.enum(['google', 'whisper']).optional(),
+  }).optional(),
+  status: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled']).default('queued'),
+  progress: z.object({
+    total: z.number().int().min(0),
+    completed: z.number().int().min(0),
+    failed: z.number().int().min(0),
+    running: z.number().int().min(0),
+  }),
+  statusByVideo: z.record(z.enum(['queued', 'running', 'completed', 'failed'])),
+  reservedCredits: z.number().int().min(0).default(0),
+  consumedCredits: z.number().int().min(0).default(0),
+  createdAt: nullableTimestamp,
+  startedAt: nullableTimestamp,
+  completedAt: nullableTimestamp,
+});
+
+export type BatchJob = z.infer<typeof batchJobSchema> & { id: string };
+
+// Credit transaction for billing
+export const creditTransactionSchema = z.object({
+  coachId: z.string().min(1),
+  type: z.enum(['allotment', 'purchase', 'reserve', 'consume', 'refund', 'release', 'adjustment']),
+  amount: z.number().int(),
+  videoId: z.string().optional(),
+  batchJobId: z.string().optional(),
+  reason: z.string().optional(),
+  balanceBefore: z.number().int().min(0),
+  balanceAfter: z.number().int().min(0),
+  actorId: z.string().min(1),
+  createdAt: nullableTimestamp,
+});
+
+export type CreditTransaction = z.infer<typeof creditTransactionSchema> & { id: string };
+
+// Coach billing for credit management
+export const coachBillingSchema = z.object({
+  coachId: z.string().min(1),
+  balance: z.number().int().min(0).default(0),
+  reservedCredits: z.number().int().min(0).default(0),
+  monthlyAllotment: z.number().int().min(0).default(0),
+  rolloverEnabled: z.boolean().default(false),
+  lastAllotmentDate: nullableTimestamp,
+  updatedAt: nullableTimestamp,
+});
+
+export type CoachBilling = z.infer<typeof coachBillingSchema> & { id: string };
+
+// YouTube connection for OAuth
+export const youtubeChannelSchema = z.object({
+  channelId: z.string().min(1),
+  title: z.string().min(1),
+  thumbnailUrl: z.string().url().optional(),
+  connectedAt: nullableTimestamp,
+});
+
+export const youtubeConnectionSchema = z.object({
+  userId: z.string().min(1),
+  coachId: z.string().min(1),
+  channels: z.array(youtubeChannelSchema).default([]),
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+  expiresAt: nullableTimestamp,
+  scopes: z.array(z.string()).default([]),
+  createdAt: nullableTimestamp,
+  updatedAt: nullableTimestamp,
+});
+
+export type YouTubeChannel = z.infer<typeof youtubeChannelSchema>;
+export type YouTubeConnection = z.infer<typeof youtubeConnectionSchema> & { id: string };
+
+// Processing log for video-level tracking
+export const processingLogSchema = z.object({
+  videoId: z.string().min(1),
+  batchJobId: z.string().optional(),
+  step: z.enum(['caption_fetch', 'segment', 'mcq_generate', 'manifest_build']),
+  status: z.enum(['started', 'completed', 'failed']),
+  actor: z.string().min(1),
+  metadata: z.object({
+    source: z.string().optional(),
+    language: z.string().optional(),
+    credits: z.number().int().optional(),
+    duration: z.number().int().optional(), // milliseconds
+    error: z.string().optional(),
+    errorCode: z.string().optional(),
+  }).optional(),
+  timestamp: nullableTimestamp,
+});
+
+export type ProcessingLog = z.infer<typeof processingLogSchema> & { id: string };
+
+// Notification for user alerts
+export const notificationSchema = z.object({
+  userId: z.string().min(1),
+  type: z.enum(['coach_video_ready', 'coach_video_failed', 'coach_batch_complete', 'student_video_ready', 'oauth_expired']),
+  title: z.string().min(1),
+  message: z.string().min(1),
+  actionUrl: z.string().optional(),
+  metadata: z.record(z.any()).optional(),
+  read: z.boolean().default(false),
+  createdAt: nullableTimestamp,
+});
+
+export type Notification = z.infer<typeof notificationSchema> & { id: string };
+
+// Updated video schema with manual processing fields
+export const videoSchemaExtended = videoSchema.extend({
+  captionSource: z.enum(['oauth', 'srt', 'ai', 'unknown']).default('unknown'),
+  captionLanguage: z.string().optional(),
+  mcqLanguage: z.string().optional(),
+  creditsConsumed: z.number().int().min(0).default(0),
+  flags: z.object({
+    lockedReady: z.boolean().default(false),
+  }).optional(),
+  errorMessage: z.string().optional(),
+});
+
+export type VideoExtended = z.infer<typeof videoSchemaExtended> & { id: string };
+
+// Updated playlist schema with ownership preflight
+export const playlistSchemaExtended = playlistSchema.extend({
+  ownershipPreflightStatus: z.enum(['pending', 'completed', 'failed']).optional(),
+  ownershipResults: z.object({
+    owned: z.array(z.string()).default([]),
+    notOwned: z.array(z.string()).default([]),
+    unknown: z.array(z.string()).default([]),
+    checkedAt: nullableTimestamp,
+  }).optional(),
+});
+
+export type PlaylistExtended = z.infer<typeof playlistSchemaExtended> & { id: string };
+
+// Updated coach schema with credits
+export const coachSchemaExtended = coachSchema.extend({
+  credits: z.object({
+    balance: z.number().int().min(0).default(0),
+    monthlyAllotment: z.number().int().min(0).default(0),
+    rolloverEnabled: z.boolean().default(false),
+  }).optional(),
+});
+
+export type CoachExtended = z.infer<typeof coachSchemaExtended> & { id: string };

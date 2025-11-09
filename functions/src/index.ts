@@ -108,7 +108,7 @@ export const setCustomClaims = onCall({ region: 'asia-south1' }, async (request)
   if (!uid || !role) {
     throw new HttpsError('invalid-argument', 'Missing uid or role.');
   }
-  if (!['admin', 'teacher', 'student'].includes(role)) {
+  if (!['admin', 'coach', 'student'].includes(role)) {
     throw new HttpsError('invalid-argument', 'Invalid role.');
   }
   await auth.setCustomUserClaims(uid, { role, coachId: coachId ?? null });
