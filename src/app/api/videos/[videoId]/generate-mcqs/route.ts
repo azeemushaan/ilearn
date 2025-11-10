@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { cleanFirestoreData } from '@/lib/utils';
-import { generateMcq } from '@/ai/flows/generate-mcq';
+import { generateMcqForSegment } from '@/lib/phase5/mcq';
+import { NO_FALLBACK } from '@/lib/constants/phase5';
 
 /**
  * Generate MCQs for all segments
- * POST /api/videos/[videoId]/mcq/generate
+ * POST /api/videos/[videoId]/generate-mcqs
  */
 export async function POST(
   request: NextRequest,
@@ -75,83 +76,72 @@ export async function POST(
     }));
 
     let totalQuestionsGenerated = 0;
-    const failedSegments: string[] = [];
+    const outcomes: Array<{ segmentId: string; reason: string; log: string }> = [];
 
     // Generate MCQs for each segment
+    const existingStems: string[] = [];
+
     for (const segmentDoc of segmentsSnapshot.docs) {
       const segmentData = segmentDoc.data();
+      const textChunk: string = segmentData.textChunk ?? '';
 
-      try {
-        const mcqResult = await generateMcq({
-          transcriptChunk: segmentData.textChunk,
-          videoTitle: videoData.title,
-          chapterName: `Segment ${segmentData.segmentIndex + 1}`,
-          gradeBand: '1-8',
-          locale: targetLanguage,
-          difficultyTarget: segmentData.difficulty,
-          coachId: videoData.coachId,
-          videoId,
-        });
-
-        const questions = Array.isArray(mcqResult?.questions) ? mcqResult.questions : [];
-
-        if (questions.length > 0) {
-          // Delete existing questions for this segment
-          const existingQuestions = await db
-            .collection(`videos/${videoId}/segments/${segmentDoc.id}/questions`)
-            .get();
-
-          const deleteBatch = db.batch();
-          existingQuestions.docs.forEach(q => deleteBatch.delete(q.ref));
-          await deleteBatch.commit();
-
-          // Store new questions
-          const questionBatch = db.batch();
-          
-          questions.forEach((question, questionIndex) => {
-            const questionRef = db
-              .collection(`videos/${videoId}/segments/${segmentDoc.id}/questions`)
-              .doc();
-
-            questionBatch.set(questionRef, {
-              segmentId: segmentDoc.id,
-              videoId,
-              coachId: videoData.coachId,
-              difficulty: question.difficulty || segmentData.difficulty,
-              stem: question.stem,
-              options: Array.isArray(question.options) ? question.options : [],
-              correctIndex: question.correctIndex,
-              rationale: question.rationale,
-              tags: Array.isArray(question.tags) ? question.tags : [],
-              createdAt: Timestamp.now(),
-              updatedAt: Timestamp.now(),
-              sequenceIndex: questionIndex,
-            });
-          });
-
-          await questionBatch.commit();
-
-          // Update segment question count
-          await segmentDoc.ref.update({
-            questionCount: questions.length,
-            updatedAt: Timestamp.now(),
-          });
-
-          totalQuestionsGenerated += questions.length;
-        } else {
-          failedSegments.push(segmentDoc.id);
-          console.warn('[MCQ Generate] No questions generated for segment:', {
-            segmentId: segmentDoc.id,
-            segmentIndex: segmentData.segmentIndex,
-          });
-        }
-      } catch (mcqError) {
-        failedSegments.push(segmentDoc.id);
-        console.error('[MCQ Generate] Failed for segment:', {
-          segmentId: segmentDoc.id,
-          error: mcqError,
-        });
+      if (!textChunk && NO_FALLBACK) {
+        outcomes.push({ segmentId: segmentDoc.id, reason: 'INSUFFICIENT_CONTEXT', log: 'MCQ:EMPTY reason=NO_TEXT' });
+        await segmentDoc.ref.update({ questionCount: 0, updatedAt: Timestamp.now() });
+        continue;
       }
+
+      const outcome = generateMcqForSegment(
+        {
+          segmentId: segmentDoc.id,
+          title: segmentData.title || `Segment ${segmentData.segmentIndex + 1}`,
+          text: textChunk,
+          tStartSec: segmentData.tStartSec,
+          tEndSec: segmentData.tEndSec,
+          language: segmentData.language || targetLanguage,
+        },
+        existingStems,
+        targetLanguage
+      );
+
+      outcomes.push({ segmentId: segmentDoc.id, reason: outcome.reason, log: outcome.log });
+
+      const existingQuestions = await db
+        .collection(`videos/${videoId}/segments/${segmentDoc.id}/questions`)
+        .get();
+
+      if (!existingQuestions.empty) {
+        const deleteBatch = db.batch();
+        existingQuestions.docs.forEach(q => deleteBatch.delete(q.ref));
+        await deleteBatch.commit();
+      }
+
+      if (outcome.mcqs.length === 0) {
+        await segmentDoc.ref.update({ questionCount: 0, updatedAt: Timestamp.now() });
+        continue;
+      }
+
+      const mcq = outcome.mcqs[0];
+      const questionRef = db.collection(`videos/${videoId}/segments/${segmentDoc.id}/questions`).doc(mcq.questionId);
+      await questionRef.set({
+        segmentId: segmentDoc.id,
+        videoId,
+        coachId: videoData.coachId,
+        stem: mcq.stem,
+        options: mcq.options,
+        correctIndex: mcq.correctIndex,
+        rationale: mcq.rationale,
+        support: mcq.support,
+        language: mcq.language,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        sequenceIndex: 0,
+      });
+
+      await segmentDoc.ref.update({ questionCount: 1, updatedAt: Timestamp.now() });
+
+      totalQuestionsGenerated += 1;
+      existingStems.push(mcq.stem);
     }
 
     // Update video status
@@ -170,7 +160,7 @@ export async function POST(
       metadata: {
         targetLanguage,
         totalQuestions: totalQuestionsGenerated,
-        failedSegments: failedSegments.length,
+        outcomes,
         duration,
       },
       timestamp: Timestamp.now(),
@@ -179,14 +169,14 @@ export async function POST(
     console.log('[MCQ Generate] Success:', {
       videoId,
       totalQuestions: totalQuestionsGenerated,
-      failedSegments: failedSegments.length,
+      outcomes,
       duration,
     });
 
     return NextResponse.json({
       success: true,
       questionsGenerated: totalQuestionsGenerated,
-      failedSegments: failedSegments.length,
+      outcomes,
       duration,
     });
   } catch (error) {

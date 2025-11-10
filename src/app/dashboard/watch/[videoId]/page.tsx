@@ -24,6 +24,8 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from '@/hooks/use-toast';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { buildProgressDocId } from '@/lib/progress/utils';
+import { PLAYER_EPSILON } from '@/lib/constants/phase5';
+import type { ManifestSegment } from '@/lib/schemas';
 
 declare global {
   interface Window {
@@ -38,9 +40,10 @@ type SegmentQuestion = {
   options: string[];
   correctIndex: number;
   rationale?: string;
-  difficulty?: string;
   segmentId: string;
   segmentIndex: number;
+  support: { tStartSec: number; tEndSec: number; text: string }[];
+  language?: string;
 };
 
 type ProgressState = {
@@ -90,9 +93,12 @@ export default function WatchPage({ params }: WatchPageProps) {
   const lastValidTimeRef = useRef<number>(0);
   const minSegmentIndexRef = useRef<number>(0);
   const progressDocRef = useRef<ReturnType<typeof doc> | null>(null);
-  const sessionQuestionHistoryRef = useRef<Record<string, Set<string>>>({});
   const currentSegmentIndexRef = useRef<number>(0);
   const enforcedSegmentRef = useRef<{ index: number; warningShown: boolean }>({ index: 0, warningShown: false });
+  const overlayOpenRef = useRef(false);
+  const furthestAllowedTimeRef = useRef(0);
+  const pendingModalCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const answeredSegmentsRef = useRef<Set<string>>(new Set());
 
   // Manifest state
   const [manifest, setManifest] = useState<any>(null);
@@ -107,7 +113,9 @@ export default function WatchPage({ params }: WatchPageProps) {
   const { data: video, isLoading: loadingVideo } = useDoc(videoRef);
 
   // Use manifest segments instead of Firestore query
-  const sortedSegments = manifest?.segments || [];
+  const sortedSegments: ManifestSegment[] = useMemo(() => {
+    return Array.isArray(manifest?.segments) ? manifest.segments : [];
+  }, [manifest?.segments]);
 
   const completedSegmentsSet = useMemo(() => {
     return new Set(progressState.segmentsCompleted);
@@ -264,6 +272,26 @@ export default function WatchPage({ params }: WatchPageProps) {
     lastValidTimeRef.current = Math.max(lastValidTimeRef.current, progressState.lastVerifiedTimeSec || 0);
   }, [progressReady, progressState.lastVerifiedTimeSec]);
 
+  useEffect(() => {
+    if (!progressReady) return;
+    answeredSegmentsRef.current = new Set(progressState.segmentsCompleted);
+  }, [progressReady, progressState.segmentsCompleted]);
+
+  useEffect(() => {
+    answeredSegmentsRef.current.clear();
+    furthestAllowedTimeRef.current = 0;
+  }, [manifest?.videoId]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingModalCheckRef.current) {
+        clearTimeout(pendingModalCheckRef.current);
+        pendingModalCheckRef.current = null;
+      }
+      stopTimeCheck();
+    };
+  }, []);
+
   // Fetch manifest from API
   useEffect(() => {
     async function fetchManifest() {
@@ -352,7 +380,7 @@ export default function WatchPage({ params }: WatchPageProps) {
       const currentTime = ytPlayer.getCurrentTime();
       enforceSegmentBoundary(ytPlayer, activeSegment, currentTime);
     },
-    [getSegmentByIndex]
+    [getSegmentByIndex, enforceSegmentBoundary]
   );
 
   // Initialize player when video data and ref are ready
@@ -430,6 +458,7 @@ export default function WatchPage({ params }: WatchPageProps) {
               console.log('[WATCH] Player state changed:', event.data);
               if (event.data === window.YT.PlayerState.PLAYING) {
                 console.log('[WATCH] Video playing');
+                handlePossibleSeek(event.target);
                 startTimeCheck(event.target);
               } else if (event.data === window.YT.PlayerState.PAUSED) {
                 console.log('[WATCH] Video paused');
@@ -504,10 +533,9 @@ export default function WatchPage({ params }: WatchPageProps) {
   const startTimeCheck = (ytPlayer: any) => {
     if (!ytPlayer) return;
     stopTimeCheck();
-    // Check every 500ms for more responsive checkpoint detection
     checkIntervalRef.current = setInterval(() => {
       checkSegmentCheckpoint(ytPlayer);
-    }, 500);
+    }, 250);
   };
 
   const stopTimeCheck = () => {
@@ -519,13 +547,12 @@ export default function WatchPage({ params }: WatchPageProps) {
 
   const enforceSegmentBoundary = (
     ytPlayer: any,
-    segment: (typeof sortedSegments)[number] | null,
+    segment: ManifestSegment | null,
     currentTime: number
   ) => {
-    if (!segment) return;
+    if (!segment) return false;
 
-    // Prevent rewinding before the current segment start
-    if (currentTime + 0.25 < segment.tStartSec) {
+    if (currentTime + PLAYER_EPSILON < segment.tStartSec) {
       if (!enforcedSegmentRef.current.warningShown) {
         toast({
           title: 'Rewind blocked',
@@ -538,6 +565,16 @@ export default function WatchPage({ params }: WatchPageProps) {
       enforcedSegmentRef.current = { index: segment.segmentIndex, warningShown: true };
       ytPlayer.seekTo(Math.max(segment.tStartSec, lastValidTimeRef.current), true);
       return true;
+    }
+
+    const hasQuestion = Array.isArray(segment.questions) && segment.questions.length > 0;
+    const answered = completedSegmentsSet.has(segment.segmentId);
+    if (hasQuestion && !answered) {
+      const allowableEnd = segment.tEndSec - PLAYER_EPSILON;
+      if (currentTime > allowableEnd + PLAYER_EPSILON) {
+        ytPlayer.seekTo(Math.max(segment.tStartSec, Math.min(allowableEnd, furthestAllowedTimeRef.current)), true);
+        return true;
+      }
     }
 
     enforcedSegmentRef.current = { index: segment.segmentIndex, warningShown: false };
@@ -599,13 +636,6 @@ export default function WatchPage({ params }: WatchPageProps) {
     [ensureProgressDoc]
   );
 
-  const noteQuestionShown = useCallback((segmentId: string, questionId: string) => {
-    if (!sessionQuestionHistoryRef.current[segmentId]) {
-      sessionQuestionHistoryRef.current[segmentId] = new Set();
-    }
-    sessionQuestionHistoryRef.current[segmentId]!.add(questionId);
-  }, []);
-
   const completeSegment = async (segmentIndex: number) => {
     const segment = sortedSegments[segmentIndex];
     if (!segment) {
@@ -621,6 +651,9 @@ export default function WatchPage({ params }: WatchPageProps) {
     if (!completedSegmentsSet.has(segment.segmentId)) {
       updates.segmentsCompleted = arrayUnion(segment.segmentId);
     }
+
+    answeredSegmentsRef.current.add(segment.segmentId);
+    furthestAllowedTimeRef.current = Math.max(furthestAllowedTimeRef.current, segment.tEndSec);
 
     await patchProgress(updates);
 
@@ -640,148 +673,122 @@ export default function WatchPage({ params }: WatchPageProps) {
     startTimeCheck(player);
   };
 
-  const checkSegmentCheckpoint = async (ytPlayer: any) => {
-    if (!sortedSegments.length || showQuiz || !progressReady) return;
+  const checkSegmentCheckpoint = useCallback(
+    (ytPlayer: any) => {
+      if (!sortedSegments.length || showQuiz || !progressReady) return;
+      if (!window.YT || ytPlayer.getPlayerState?.() !== window.YT.PlayerState.PLAYING) return;
+      if (overlayOpenRef.current) return;
 
-    const currentTime = ytPlayer.getCurrentTime();
-    const nextSegment = getSegmentByIndex(currentSegmentIndex);
-
-    // Stop if we've reached the end of all segments
-    if (!nextSegment) {
-      console.log('[WATCH] All segments completed:', {
-        currentTime,
-        totalSegments: sortedSegments.length,
-        currentSegmentIndex,
-      });
-      stopTimeCheck();
-      return;
-    }
-
-    // Anti-skip: Detect if student manually seeked forward
-    if (enforceSegmentBoundary(ytPlayer, nextSegment, currentTime)) {
-      return;
-    }
-
-    const maxAllowedTime = nextSegment.tEndSec + 2; // Allow 2 second buffer
-    if (currentTime > maxAllowedTime && currentTime > lastValidTimeRef.current + 3) {
-      console.warn('[WATCH] ⚠️ Skip detected - rewinding to last valid position:', {
-        currentTime,
-        lastValidTime: lastValidTimeRef.current,
-        maxAllowed: maxAllowedTime,
-      });
-      toast({
-        title: 'Skip blocked',
-        description: 'Please finish the active segment before jumping ahead.',
-        variant: 'destructive',
-      });
-      setSegmentNotice('Skipping ahead is disabled until you finish the current quiz.');
-      setTimeout(() => setSegmentNotice(null), 4000);
-      ytPlayer.seekTo(lastValidTimeRef.current, true);
-      return;
-    }
-
-    // Update last valid time
-    if (currentTime <= maxAllowedTime) {
-      lastValidTimeRef.current = currentTime;
-    }
-
-    // Check if student skipped ahead past multiple segments (in case anti-skip failed)
-    let segmentIndexToQuiz = currentSegmentIndex;
-    for (let i = currentSegmentIndex; i < sortedSegments.length; i++) {
-      const segment = sortedSegments[i];
-      if (currentTime < segment.tEndSec) {
-        // Student is within this segment
-        break;
-      }
-      // Student has passed this segment's end - we need to quiz them
-      segmentIndexToQuiz = i;
-    }
-
-    // If we found a missed segment, quiz on it immediately
-    if (segmentIndexToQuiz !== currentSegmentIndex || currentTime >= nextSegment.tEndSec) {
-      const segmentToQuiz = sortedSegments[segmentIndexToQuiz];
-      console.log('[WATCH] Segment checkpoint reached:', {
-        currentTime,
-        segmentIndex: segmentIndexToQuiz,
-        segmentId: segmentToQuiz.segmentId,
-        tEndSec: segmentToQuiz.tEndSec,
-        totalSegments: sortedSegments.length,
-        skippedAhead: segmentIndexToQuiz > currentSegmentIndex,
-      });
-      syncSegmentIndex(segmentIndexToQuiz);
-      ytPlayer.pauseVideo();
-      stopTimeCheck();
-      await loadQuestionForSegment(segmentToQuiz.segmentId, segmentIndexToQuiz);
-    }
-  };
-
-  const loadQuestionForSegment = async (segmentId: string, segmentIndex: number) => {
-    console.log('[WATCH] Loading questions for segment:', {
-      segmentId,
-      segmentIndex,
-      totalSegments: sortedSegments.length,
-    });
-    
-    const questionsRef = collection(firestore!, `videos/${videoId}/segments/${segmentId}/questions`);
-    const { getDocs } = await import('firebase/firestore');
-    const questionsSnap = await getDocs(questionsRef);
-    
-    console.log('[WATCH] Questions loaded:', {
-      segmentId,
-      segmentIndex,
-      questionCount: questionsSnap.docs.length,
-      path: `videos/${videoId}/segments/${segmentId}/questions`,
-      allQuestions: questionsSnap.docs.map(d => ({
-        id: d.id,
-        stem: d.data().stem?.substring(0, 80),
-        difficulty: d.data().difficulty,
-      })),
-    });
-    
-    if (questionsSnap && !questionsSnap.empty) {
-      const persistedHistory = progressState.questionHistory[segmentId] || [];
-      const seenIds = new Set<string>(persistedHistory);
-      const sessionHistory = sessionQuestionHistoryRef.current[segmentId];
-      sessionHistory?.forEach(id => seenIds.add(id));
-
-      const availableQuestions = questionsSnap.docs.filter(docSnapshot => !seenIds.has(docSnapshot.id));
-
-      if (availableQuestions.length === 0) {
-        toast({
-          title: 'All questions answered',
-          description: 'This segment has no new questions left. Moving ahead.',
-        });
-        await completeSegment(segmentIndex);
+      const activeIndex = currentSegmentIndexRef.current;
+      const segment = getSegmentByIndex(activeIndex);
+      if (!segment) {
+        stopTimeCheck();
         return;
       }
 
-      const randomQuestion = availableQuestions[Math.floor(Math.random() * availableQuestions.length)];
-      const rawData = randomQuestion.data() as Omit<SegmentQuestion, 'id' | 'segmentId' | 'segmentIndex'>;
-      const questionData: SegmentQuestion = {
-        id: randomQuestion.id,
-        segmentId,
-        segmentIndex,
-        stem: rawData.stem,
-        options: Array.isArray(rawData.options) ? rawData.options : [],
-        correctIndex: rawData.correctIndex,
-        rationale: rawData.rationale,
-        difficulty: rawData.difficulty,
-      };
-      console.log('[WATCH] Showing quiz:', {
-        questionId: randomQuestion.id,
-        segmentIndex,
-        stem: questionData.stem?.substring(0, 100),
-        correctIndex: questionData.correctIndex,
-      });
-      noteQuestionShown(segmentId, questionData.id);
-      setCurrentQuestion(questionData);
-      syncSegmentIndex(segmentIndex);
-      setShowQuiz(true);
-    } else {
-      console.log('[WATCH] No questions found, auto-advancing to next segment');
-      await completeSegment(segmentIndex);
-    }
-  };
+      const currentTime = ytPlayer.getCurrentTime();
+
+      if (enforceSegmentBoundary(ytPlayer, segment, currentTime)) {
+        return;
+      }
+
+      const hasQuestion = Array.isArray(segment.questions) && segment.questions.length > 0;
+      const answered =
+        completedSegmentsSet.has(segment.segmentId) || answeredSegmentsRef.current.has(segment.segmentId);
+      const allowableEnd = hasQuestion && !answered ? segment.tEndSec - PLAYER_EPSILON : Infinity;
+
+      if (currentTime <= allowableEnd) {
+        lastValidTimeRef.current = Math.max(lastValidTimeRef.current, currentTime);
+        furthestAllowedTimeRef.current = Math.max(furthestAllowedTimeRef.current, currentTime);
+      }
+
+      if (currentTime > allowableEnd + PLAYER_EPSILON && allowableEnd !== Infinity) {
+        console.warn('[WATCH] Skip detected beyond checkpoint boundary', {
+          segmentId: segment.segmentId,
+          currentTime,
+          allowableEnd,
+        });
+        toast({
+          title: 'Quiz required',
+          description: 'Answer the quiz to continue watching.',
+          variant: 'destructive',
+        });
+        setSegmentNotice('Answer this quiz to continue.');
+        setTimeout(() => setSegmentNotice(null), 4000);
+        ytPlayer.seekTo(Math.max(segment.tStartSec, Math.min(allowableEnd, lastValidTimeRef.current)), true);
+        return;
+      }
+
+      if (!hasQuestion || answered) {
+        if (currentTime >= segment.tEndSec - PLAYER_EPSILON) {
+          if (!answered) {
+            completeSegment(activeIndex).catch(error => {
+              console.error('[WATCH] Failed to auto-complete segment without MCQ', error);
+            });
+          } else if (activeIndex < sortedSegments.length - 1) {
+            syncSegmentIndex(activeIndex + 1);
+          }
+        }
+        return;
+      }
+
+      if (currentTime >= segment.tEndSec - PLAYER_EPSILON) {
+        const question = segment.questions[0];
+        if (!question) {
+          console.error('PLR:PAUSE_NO_MODAL', { segmentId: segment.segmentId, reason: 'no_question_payload' });
+          alert('A required quiz could not be loaded. Please refresh the page.');
+          return;
+        }
+
+        ytPlayer.pauseVideo();
+        if (pendingModalCheckRef.current) {
+          clearTimeout(pendingModalCheckRef.current);
+        }
+        requestAnimationFrame(() => {
+          overlayOpenRef.current = true;
+          setSelectedOption(null);
+          setAnswered(false);
+          setCurrentQuestion({
+            id: question.questionId,
+            segmentId: segment.segmentId,
+            segmentIndex: segment.segmentIndex,
+            stem: question.stem,
+            options: Array.isArray(question.options) ? question.options : ['', '', '', ''],
+            correctIndex: question.correctIndex,
+            rationale: question.rationale,
+            support: Array.isArray(question.support) ? question.support : [],
+            language: question.language,
+          });
+          setShowQuiz(true);
+          console.log('PLR:PAUSE_MODAL_SHOWN', {
+            segmentId: segment.segmentId,
+            questionId: question.questionId,
+            time: currentTime,
+          });
+        });
+
+        pendingModalCheckRef.current = setTimeout(() => {
+          if (!overlayOpenRef.current) {
+            console.error('PLR:PAUSE_NO_MODAL', { segmentId: segment.segmentId, currentTime });
+            alert('Playback paused for a quiz, but the quiz did not appear. Please refresh.');
+          }
+        }, 200);
+      }
+    },
+    [
+      sortedSegments,
+      showQuiz,
+      progressReady,
+      completedSegmentsSet,
+      getSegmentByIndex,
+      enforceSegmentBoundary,
+      toast,
+      syncSegmentIndex,
+      stopTimeCheck,
+      completeSegment,
+    ]
+  );
+
 
   const handleAnswerSubmit = async () => {
     if (selectedOption === null || !currentQuestion || !user) return;
@@ -843,6 +850,11 @@ export default function WatchPage({ params }: WatchPageProps) {
     setCurrentQuestion(null);
     setSelectedOption(null);
     setAnswered(false);
+    overlayOpenRef.current = false;
+    if (pendingModalCheckRef.current) {
+      clearTimeout(pendingModalCheckRef.current);
+      pendingModalCheckRef.current = null;
+    }
 
     const answeredSegmentIndex = currentQuestion?.segmentIndex ?? currentSegmentIndex;
     console.log('[WATCH] Continuing to next segment:', {
@@ -852,6 +864,10 @@ export default function WatchPage({ params }: WatchPageProps) {
 
     await completeSegment(answeredSegmentIndex);
   };
+
+  useEffect(() => {
+    currentSegmentIndexRef.current = currentSegmentIndex;
+  }, [currentSegmentIndex]);
 
   const videoStatus = (video as any)?.status;
   const shouldShowPlayer = video && manifest && !loadingVideo && !loadingManifest;
@@ -943,7 +959,11 @@ export default function WatchPage({ params }: WatchPageProps) {
       ) : shouldShowPlayer ? (
         <>
           <div className="relative w-full bg-gray-900" style={{ paddingTop: '56.25%' }}>
-            <div ref={playerRef} className="absolute inset-0" id="youtube-player-container" />
+            <div
+              ref={playerRef}
+              className={`absolute inset-0 ${showQuiz ? 'pointer-events-none' : 'pointer-events-auto'}`}
+              id="youtube-player-container"
+            />
             {segmentNotice && (
               <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
                 <div className="rounded-full bg-black/70 px-4 py-1 text-sm text-white">
@@ -991,7 +1011,7 @@ export default function WatchPage({ params }: WatchPageProps) {
       )}
 
       {showQuiz && currentQuestion && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4 pointer-events-auto">
           <Card className="w-full max-w-2xl">
             <CardHeader>
               <div className="flex items-start justify-between">
@@ -1051,8 +1071,4 @@ export default function WatchPage({ params }: WatchPageProps) {
       )}
     </div>
   );
-
-  useEffect(() => {
-    currentSegmentIndexRef.current = currentSegmentIndex;
-  }, [currentSegmentIndex]);
 }

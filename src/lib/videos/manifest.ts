@@ -1,5 +1,5 @@
 import { adminFirestore } from '@/lib/firebase/admin';
-import { videoManifestSchema, type VideoManifest } from '@/lib/schemas';
+import { videoManifestSchema, type VideoManifest, type ManifestSegment } from '@/lib/schemas';
 
 const scrubSegment = (raw: any, segmentId: string) => {
   const tStartSec = typeof raw?.tStartSec === 'number' ? raw.tStartSec : 0;
@@ -11,10 +11,12 @@ const scrubSegment = (raw: any, segmentId: string) => {
   return {
     segmentId,
     segmentIndex: raw?.segmentIndex ?? 0,
+    title: raw?.title || `Segment ${raw?.segmentIndex + 1 ?? ''}`,
+    language: raw?.language || 'en',
     tStartSec,
     tEndSec,
     durationSec: raw?.durationSec || Math.max(0, tEndSec - tStartSec),
-    difficulty: raw?.difficulty,
+    textChunk: raw?.textChunk,
   };
 };
 
@@ -25,7 +27,7 @@ export async function buildVideoManifest(videoId: string, videoData: any): Promi
     .orderBy('tStartSec')
     .get();
 
-  const segments: VideoManifest['segments'] = [];
+  const segments: ManifestSegment[] = [];
   let totalQuestions = 0;
   let latestEnd = 0;
 
@@ -38,12 +40,41 @@ export async function buildVideoManifest(videoId: string, videoData: any): Promi
     const questionsSnapshot = await db
       .collection(`videos/${videoId}/segments/${segmentDoc.id}/questions`)
       .get();
-    const questionIds = questionsSnapshot.docs.map(question => question.id);
-    totalQuestions += questionIds.length;
+
+    const questions = questionsSnapshot.docs.map(questionDoc => {
+      const data = questionDoc.data();
+      return {
+        questionId: questionDoc.id,
+        stem: data.stem,
+        options: Array.isArray(data.options)
+          ? [data.options[0] ?? '', data.options[1] ?? '', data.options[2] ?? '', data.options[3] ?? '']
+          : ['', '', '', ''],
+        correctIndex: typeof data.correctIndex === 'number' ? data.correctIndex : 0,
+        rationale: data.rationale,
+        support: Array.isArray(data.support)
+          ? data.support
+              .map((supportItem: any) => ({
+                tStartSec: Number(supportItem?.tStartSec) || cleaned.tStartSec,
+                tEndSec: Number(supportItem?.tEndSec) || cleaned.tEndSec,
+                text: String(supportItem?.text || ''),
+              }))
+              .filter(item => item.text.length > 0)
+          : [],
+        language: data.language || cleaned.language,
+      };
+    });
+
+    totalQuestions += questions.length;
 
     segments.push({
-      ...cleaned,
-      questionIds,
+      segmentId: cleaned.segmentId,
+      segmentIndex: cleaned.segmentIndex,
+      title: cleaned.title,
+      language: cleaned.language,
+      tStartSec: cleaned.tStartSec,
+      tEndSec: cleaned.tEndSec,
+      durationSec: cleaned.durationSec,
+      questions,
     });
     latestEnd = Math.max(latestEnd, cleaned.tEndSec);
   }
@@ -60,7 +91,7 @@ export async function buildVideoManifest(videoId: string, videoData: any): Promi
     totalSegments: segments.length,
     totalQuestions,
     generatedAt: new Date().toISOString(),
-    version: '1.0',
+    version: '2.0',
   } satisfies VideoManifest;
 
   return videoManifestSchema.parse(manifest);

@@ -1,8 +1,23 @@
 import assert from 'node:assert/strict';
-import { coachSchema, planSchema, paymentSchema, subscriptionSchema, invoiceSchema } from '@/lib/schemas';
-import { approvePayment } from '@/lib/firestore/admin-ops';
+import Module from 'node:module';
+
+const originalLoad = Module._load;
+Module._load = function patchedLoad(request: string, parent: NodeModule | null, isMain: boolean) {
+  if (request === 'firebase/firestore') {
+    return {
+      Timestamp: class MockTimestamp {
+        static now() {
+          return { toDate: () => new Date() };
+        }
+      },
+    };
+  }
+  return originalLoad(request, parent, isMain);
+};
+
 
 async function testSchemas() {
+  const { coachSchema, planSchema, paymentSchema, subscriptionSchema, invoiceSchema } = await import('@/lib/schemas');
   const coach = coachSchema.parse({
     displayName: 'Coach',
     email: 'coach@example.com',
@@ -64,6 +79,7 @@ async function testSchemas() {
 }
 
 async function testApprovePayment() {
+  const { approvePayment } = await import('@/lib/firestore/admin-ops');
   const updateMock = () => Promise.resolve();
   const getMock = () =>
     Promise.resolve({
@@ -85,9 +101,85 @@ async function testApprovePayment() {
   await approvePayment('payment', 'admin', undefined, firestoreMock, async () => undefined);
 }
 
+async function testSegmentationRules() {
+  const { segmentTranscriptPhase5 } = await import('@/lib/phase5/segmentation');
+  const cues = [
+    { tStartSec: 0, tEndSec: 5, text: '[Music]' },
+    { tStartSec: 5, tEndSec: 12, text: 'Welcome to my channel intro for today!' },
+    {
+      tStartSec: 12,
+      tEndSec: 80,
+      text: 'Artificial intelligence is the simulation of human intelligence in machines that are programmed to think like humans.',
+    },
+  ];
+
+  const result = segmentTranscriptPhase5(cues, { language: 'en', videoTopic: 'Artificial Intelligence' });
+
+  assert.equal(result.segments.length, 1, 'Should keep exactly one educational segment');
+  assert(result.logs.some(log => log.includes('SEG:KEEP')), 'Should emit keep logs');
+  assert(result.skipped.length >= 1, 'Should skip non-instructional cues');
+  assert(!result.segments[0].text.toLowerCase().includes('welcome to my channel'), 'Intro text should be removed');
+}
+
+async function testMcqRules() {
+  const { generateMcqForSegment } = await import('@/lib/phase5/mcq');
+  const outcomeEmpty = generateMcqForSegment(
+    {
+      segmentId: 'seg-empty',
+      title: 'Overview',
+      text: 'Too short to assess.',
+      tStartSec: 0,
+      tEndSec: 5,
+      language: 'en',
+    },
+    [],
+    'en'
+  );
+
+  assert.equal(outcomeEmpty.mcqs.length, 0, 'Short segments must not produce MCQs');
+  assert.equal(outcomeEmpty.reason, 'INSUFFICIENT_CONTEXT');
+
+  const informativeText =
+    'Artificial intelligence is the simulation of human intelligence in machines. These systems can learn from data.';
+  const outcome = generateMcqForSegment(
+    {
+      segmentId: 'seg-ai',
+      title: 'AI Basics',
+      text: informativeText,
+      tStartSec: 0,
+      tEndSec: 60,
+      language: 'en',
+    },
+    [],
+    'en'
+  );
+
+  assert.equal(outcome.mcqs.length, 1, 'Assessable segments should yield one MCQ');
+  assert(outcome.mcqs[0]?.support?.length, 'MCQ must include supporting lines');
+
+  const duplicateOutcome = generateMcqForSegment(
+    {
+      segmentId: 'seg-ai-dup',
+      title: 'AI Basics',
+      text: 'Artificial intelligence is the simulation of human intelligence in machines with algorithms.',
+      tStartSec: 70,
+      tEndSec: 130,
+      language: 'en',
+    },
+    outcome.mcqs.map(mcq => mcq.stem),
+    'en'
+  );
+
+  assert.equal(duplicateOutcome.mcqs.length, 0, 'Duplicate stems should be dropped');
+  assert.equal(duplicateOutcome.reason, 'DUPLICATE');
+}
+
 async function main() {
   await testSchemas();
   await testApprovePayment();
+  await testSegmentationRules();
+  await testMcqRules();
+  Module._load = originalLoad;
   console.log('All tests passed');
 }
 
