@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { cleanFirestoreData } from '@/lib/utils';
-import { parseSRT, parseVTT, segmentTranscript } from '@/lib/youtube/segmentation';
+import { parseSRT, parseVTT } from '@/lib/youtube/segmentation';
+import { segmentTranscriptPhase5, toFirestoreSegment, segmentTelemetrySummary } from '@/lib/phase5/segmentation';
+import { SEG_MIN_CHARS } from '@/lib/constants/phase5';
 
 /**
  * Segment transcript into chunks
@@ -19,7 +21,7 @@ export async function POST(
     const { videoId } = params;
 
     const body = await request.json();
-    const { segmentDuration = 45, userId } = body;
+    const { userId } = body;
 
     if (!userId) {
       return NextResponse.json(
@@ -66,7 +68,7 @@ export async function POST(
       status: 'started',
       actor: userId,
       metadata: {
-        segmentDuration,
+        segMinChars: SEG_MIN_CHARS,
       },
       timestamp: Timestamp.now(),
     }));
@@ -84,21 +86,16 @@ export async function POST(
     console.log('[Segment] First few cues:', cues.slice(0, 3));
 
     // Segment transcript
-    const segments = segmentTranscript(cues, {
-      minDuration: 30,
-      maxDuration: 60,
-      preferredDuration: segmentDuration,
+    const segmentationResult = segmentTranscriptPhase5(cues, {
+      language: captionData.language || 'en',
+      videoTopic: videoData.title,
     });
 
-    console.log('[Segment] Generated segments count:', segments.length);
-    console.log('[Segment] First segment:', segments[0]);
+    console.log('[Segment] Segmentation telemetry:', segmentTelemetrySummary(segmentationResult));
+    segmentationResult.logs.forEach(log => console.log('[Segment]', log));
 
-    if (segments.length === 0) {
-      console.error('[Segment] No segments generated. Cues:', cues.length, 'Segment options:', {
-        minDuration: 30,
-        maxDuration: 60,
-        preferredDuration: segmentDuration,
-      });
+    if (segmentationResult.segments.length === 0) {
+      console.error('[Segment] No segments generated. Logs:', segmentationResult.logs);
       throw new Error('No segments generated from transcript');
     }
 
@@ -116,25 +113,17 @@ export async function POST(
     const segmentRefs: string[] = [];
     const segmentBatch = db.batch();
 
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      const difficulty = i < segments.length / 3 ? 'easy' 
-        : i < (2 * segments.length) / 3 ? 'medium' 
-        : 'hard';
+    const keptSegments = segmentationResult.segments;
 
-      const segmentRef = db.collection(`videos/${videoId}/segments`).doc();
-      
+    for (let i = 0; i < keptSegments.length; i++) {
+      const segment = keptSegments[i];
+      const segmentRef = db.collection(`videos/${videoId}/segments`).doc(segment.segmentId);
+
       segmentBatch.set(segmentRef, {
         videoId,
         coachId: videoData.coachId,
-        segmentIndex: i,
-        tStartSec: segment.tStartSec,
-        tEndSec: segment.tEndSec,
-        durationSec: segment.tEndSec - segment.tStartSec,
-        textChunk: segment.textChunk,
-        textChunkHash: segment.textChunkHash,
-        summary: segment.textChunk.slice(0, 100) + (segment.textChunk.length > 100 ? '...' : ''),
-        difficulty,
+        ...toFirestoreSegment(segment, i),
+        summary: segment.text.slice(0, 100) + (segment.text.length > 100 ? '...' : ''),
         questionCount: 0,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
@@ -147,7 +136,7 @@ export async function POST(
 
     // Update video
     await videoRef.update({
-      segmentCount: segments.length,
+      segmentCount: keptSegments.length,
       status: 'not_ready', // Waiting for MCQ generation
       updatedAt: Timestamp.now(),
     });
@@ -160,21 +149,24 @@ export async function POST(
       status: 'completed',
       actor: userId,
       metadata: {
-        segmentCount: segments.length,
+        segmentCount: keptSegments.length,
         duration,
+        skipped: segmentationResult.skipped.length,
       },
       timestamp: Timestamp.now(),
     }));
 
     console.log('[Segment] Success:', {
       videoId,
-      segmentCount: segments.length,
+      segmentCount: keptSegments.length,
       duration,
     });
 
     return NextResponse.json({
       success: true,
-      segmentCount: segments.length,
+      segmentCount: keptSegments.length,
+      skipped: segmentationResult.skipped,
+      logs: segmentationResult.logs,
       duration,
     });
   } catch (error) {

@@ -380,14 +380,33 @@ export const invitationSchema = z.object({
 export type Invitation = z.infer<typeof invitationSchema> & { id: string };
 
 // Video manifest schemas for cached segment/question data
+export const manifestQuestionSchema = z.object({
+  questionId: z.string(),
+  stem: z.string(),
+  options: z.tuple([z.string(), z.string(), z.string(), z.string()]),
+  correctIndex: z.number().int().min(0).max(3),
+  rationale: z.string().optional(),
+  support: z
+    .array(
+      z.object({
+        tStartSec: z.number().min(0),
+        tEndSec: z.number().min(0),
+        text: z.string(),
+      })
+    )
+    .default([]),
+  language: z.string().default('en'),
+});
+
 export const manifestSegmentSchema = z.object({
   segmentId: z.string(),
   segmentIndex: z.number().int().min(0),
+  title: z.string(),
+  language: z.string().default('en'),
   tStartSec: z.number().min(0),
   tEndSec: z.number().min(0),
   durationSec: z.number().min(0),
-  questionIds: z.array(z.string()),
-  difficulty: z.enum(['easy', 'medium', 'hard']).optional(),
+  questions: z.array(manifestQuestionSchema).max(1),
 });
 
 export const videoManifestSchema = z.object({
@@ -402,10 +421,11 @@ export const videoManifestSchema = z.object({
   totalSegments: z.number().int().min(0),
   totalQuestions: z.number().int().min(0),
   generatedAt: z.string(), // ISO timestamp
-  version: z.string().default('1.0'),
+  version: z.string().default('2.0'),
 });
 
 export type ManifestSegment = z.infer<typeof manifestSegmentSchema>;
+export type ManifestQuestion = z.infer<typeof manifestQuestionSchema>;
 export type VideoManifest = z.infer<typeof videoManifestSchema>;
 
 // Manual Processing System Schemas

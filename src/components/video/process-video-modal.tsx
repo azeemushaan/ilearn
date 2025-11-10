@@ -257,7 +257,6 @@ export function ProcessVideoModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          segmentDuration: 45,
           userId,
         }),
       });
@@ -275,12 +274,12 @@ export function ProcessVideoModal({
       setProcessingStepName('Generating MCQs');
       addLog('Generating quiz questions...');
 
-      const mcqResponse = await fetch(`/api/videos/${videoId}/mcq/generate`, {
+      const mcqResponse = await fetch(`/api/videos/${videoId}/generate-mcqs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetLanguage: mcqLanguage,
           userId,
+          targetLanguage: mcqLanguage,
         }),
       });
 
@@ -290,9 +289,12 @@ export function ProcessVideoModal({
       }
 
       const mcqData = await mcqResponse.json();
-      addLog(`✓ Generated ${mcqData.questionsGenerated} questions`);
-      if (mcqData.failedSegments > 0) {
-        addLog(`⚠ ${mcqData.failedSegments} segments had no questions`);
+      addLog(`✓ Generated ${mcqData.questionsGenerated} grounded questions`);
+      const failed = Array.isArray(mcqData.outcomes)
+        ? mcqData.outcomes.filter((outcome: any) => (outcome?.reason || '').toUpperCase() !== 'OK').length
+        : 0;
+      if (failed > 0) {
+        addLog(`⚠ ${failed} segments yielded no MCQs`);
       }
       setProcessingProgress(75);
 
