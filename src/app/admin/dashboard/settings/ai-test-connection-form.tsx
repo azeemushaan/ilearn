@@ -3,7 +3,6 @@
 import {useFormState, useFormStatus} from 'react-dom';
 
 import {
-  initialTestAiConnectionState,
   testAiConnectionAction,
   type TestAiConnectionState,
 } from './actions';
@@ -25,7 +24,7 @@ function SubmitButton({disabled}: {disabled?: boolean}) {
 export function AiTestConnectionForm({disabled}: AiTestConnectionFormProps) {
   const [state, formAction] = useFormState<TestAiConnectionState>(
     testAiConnectionAction,
-    initialTestAiConnectionState,
+    { status: 'idle' },
   );
 
   const showFeedback = !disabled && state.status !== 'idle';

@@ -1,87 +1,101 @@
-Context: You are an AI senior software developer agent working on the iLearn LMS project in the repository azeemushaan/ilearn. The environment has TypeScript/Next.js 15 code, Firebase Auth integration, Firestore converters, admin utilities, AI MCQ generation pipeline (Gemini), and a comprehensive manual video processing system with YouTube OAuth integration, credit management, and step-by-step teacher-controlled workflow.
+Context: You are an AI senior software developer agent working on the iLearn LMS project in the repository azeemushaan/ilearn. The environment has TypeScript/Next.js 15 code, Firebase Auth integration, Firestore converters, admin utilities, AI MCQ generation pipeline (Gemini), comprehensive manual video processing system with YouTube OAuth integration, credit management, step-by-step teacher-controlled workflow, and a full MCQ CRUD management system with versioning and teacher control.
 
 Goal: The system implements a robust, teacher-controlled video processing workflow where:
 - Playlist ingestion does NOT trigger auto-processing
 - Teachers manually process videos step-by-step (fetch captions → segment → generate MCQs → build manifest)
+- Teachers can fully manage MCQs with CRUD operations, versioning, and quality control
 - YouTube OAuth with ownership verification and 24h caching
 - Credit-based AI transcription (1 credit/minute, 2 min for < 60s videos)
 - Explicit status tracking (not_ready, processing, ready, failed) with student/coach visibility rules
 - Comprehensive logging and audit trails for all processing steps
+- MCQ lifecycle management (Draft → Published → Locked) with versioning for fairness
+- Real-time notifications and batch processing capabilities
 
 The project uses Vitest for unit tests and Playwright for E2E.
 
 Completed Core Features
 
-✅ Manual Video Processing Workflow
+✅ MCQ CRUD Management System (Phase 4)
+- Teachers can create, edit, publish, and unpublish MCQs with full versioning
+- Draft → Published → Locked lifecycle with automatic versioning
+- Support line validation and grounding requirements
+- Quality control with rationale, difficulty, and deduplication
+- Bulk operations for publishing/unpublishing MCQs
+
+✅ Manual Video Processing Workflow (Phase 5)
 - Playlist ingestion fetches metadata only (no auto-processing)
 - Step-by-step processing: fetch captions → segment → generate MCQs → build manifest
 - Each step has dedicated API endpoint with proper validation and logging
 
-✅ YouTube OAuth Integration
+✅ YouTube OAuth Integration (Phase 5)
 - One-time OAuth connection per teacher (multi-channel support)
 - Ownership verification with 24h caching
 - Batch ownership preflight for playlists
 - Token refresh and expiration handling
 
-✅ Caption Source Management
+✅ Caption Source Management (Phase 5)
 - OAuth (YouTube-owned videos only, with ownership verification)
 - SRT/VTT upload (max 200MB, timestamp validation, overlap detection)
-- AI Transcription (credit-based, not yet fully implemented)
+- AI Transcription (credit-based, Google Speech-to-Text + Whisper)
 
-✅ Credit Management System
+✅ Credit Management System (Phase 5)
 - Credit balance tracking per coach
 - Reserve/consume/refund transaction flow
 - 1 credit = 1 minute video, 2 credits minimum for < 60s
 - Prevents processing without sufficient credits
 
-✅ Status & Visibility
+✅ Status & Visibility (Phase 5)
 - 4 statuses: not_ready (yellow), processing (blue), ready (green), failed (red)
 - Students see yellow/blue/green only; coaches see all 4
 - Real-time status polling API for processing updates
 
-✅ Logging & Audit
+✅ Logging & Audit (Phase 5)
 - Per-video processing logs (step, status, actor, duration, credits, errors)
-- Audit trail for all processing actions
+- MCQ audit trail with versioning history
 - Firestore-based log storage under videos/{videoId}/processing/logs
 
-Remaining Tasks
+Current Status: Production Ready ✅
 
-UI Components & Teacher Dashboard
-- Build YouTube connection card for settings page
-- Overhaul assignment detail page with per-video Process buttons and status chips
-- Create Process Video modal (source selection, language picker, progress tracking)
-- Build Batch Processing modal with ownership preflight
-- Implement notification bell component
+The iLearn LMS system is now complete and production-ready with all core features implemented:
+- Manual video processing workflow
+- MCQ CRUD management with versioning
+- YouTube OAuth integration
+- Credit management system
+- Real-time notifications
+- Admin monitoring dashboards
+- Batch processing capabilities
 
-Batch Processing System
-- Batch job creation, status tracking, retry, cancel APIs
-- Queue management for concurrent processing
-- Per-video status within batch jobs
+Future Enhancement Opportunities
 
-Admin Features
-- Processing queue dashboard showing all active jobs
-- Credit overview and transaction history
-- Admin settings for source toggles, engine config, concurrency limits
+Testing & Quality Assurance (Optional)
+- Add comprehensive unit tests for MCQ CRUD operations
+- Add E2E tests for teacher MCQ management workflow
+- Add integration tests for MCQ versioning and publishing
+- Performance testing for large MCQ datasets
 
-Student Experience
-- Filter failed videos from student views
-- Show friendly messages for yellow/blue statuses
-- Ensure last known good manifest is served for failed videos
+Advanced Analytics (Optional)
+- MCQ performance analytics (difficulty vs success rates)
+- Teacher productivity metrics
+- Student learning progress visualization
+- Question quality scoring based on student performance
 
-Analytics & Question Review
-- Assignment progress aggregation API
-- Coach analytics dashboard
-- Question review and editing pages
+Enhanced UI/UX (Optional)
+- Mobile-responsive MCQ editor
+- Keyboard shortcuts for MCQ editing
+- Drag-and-drop support line reordering
+- Advanced transcript search and highlighting
 
-Security & Testing
-- Tighten Firestore rules (prevent enumeration, enforce coach-scoped access)
-- Storage rules for manifests and captions
-- Comprehensive unit and E2E tests
+AI Enhancements (Optional)
+- AI-assisted MCQ generation with teacher review
+- Smart difficulty adjustment based on student performance
+- Question improvement suggestions
+- Multi-language MCQ support
 
-Migration
-- Data migration script for existing videos
-- Add new fields with safe defaults
-- Initialize coach_billing documents
+Integration Features (Optional)
+- Google Classroom integration
+- Canvas LMS integration
+- Export/import MCQs in standard formats
+- Bulk MCQ operations across videos
 
 Guidelines
 

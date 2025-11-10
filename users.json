@@ -1,0 +1,106 @@
+{"users": [
+{
+  "localId": "BBEQKr8UdGYBxH7yKhpMLBj0KHK2",
+  "email": "carol@student.com",
+  "emailVerified": true,
+  "passwordHash": "gEiUvX5tJ/+iGskCQ48NMiSNr5u3UiSYolKebPRd8N484BY8CShVSsDOHftAMeWUsh6uLVvhwMjHWLHHLdpDtA==",
+  "salt": "EjVv8/CuGj6+bg==",
+  "displayName": "Carol Martinez",
+  "createdAt": "1762008806148",
+  "disabled": false,
+  "customAttributes": "{\"role\":\"student\",\"coachId\":\"BHo5abrjh4MhOEnP8N5P\"}",
+  "providerUserInfo": []
+},
+{
+  "localId": "Iq675cjF4WQu5bNP5x51j3tH0Hs2",
+  "email": "thezetasoft@gmail.com",
+  "emailVerified": false,
+  "passwordHash": "X+cTwCFLmsDH03fnSsgceoAnMRcB1QK0ZI3gsBWPIEy4RufLbJ/hOOgwRPD4fJqFJqwBQHoQurw/GP59mrjTAw==",
+  "salt": "ggSZlwSlKuEM9w==",
+  "lastSignedInAt": "1762268283651",
+  "createdAt": "1761949493303",
+  "customAttributes": "{\"role\":\"teacher\",\"coachId\":\"wCmv0329rLn3kUVGuK8m\"}",
+  "providerUserInfo": []
+},
+{
+  "localId": "OYlcmR3B6hNmoKjUMAVRE3E1qUC2",
+  "email": "alice@student.com",
+  "emailVerified": true,
+  "passwordHash": "n6B/oCPPJ4zFbqlK+qVE//ptutzIfzwOZwNl2n1vmAH6zNHwMNVCFxSYtfQPbd49XBjPXaPPWnY5baOgq9wmcg==",
+  "salt": "M3Llvz1U6HlmJw==",
+  "displayName": "Alice Johnson",
+  "createdAt": "1762008801537",
+  "disabled": false,
+  "customAttributes": "{\"role\":\"student\",\"coachId\":\"BHo5abrjh4MhOEnP8N5P\"}",
+  "providerUserInfo": []
+},
+{
+  "localId": "W6v6rjGTeSRLK7xOhEeTYJ9hdCC3",
+  "email": "admin@ilearn.com",
+  "emailVerified": true,
+  "passwordHash": "auIqkxVTHq/Yo/zaa6U2kwBFMuP/liQa/gLwhBmenJjaNvu6q/lvsCs3eJWJw2CTJQPsJQGoy5t12RK3TPVI/w==",
+  "salt": "c5XVLZYNsiFu8w==",
+  "displayName": "Admin User",
+  "createdAt": "1761903891518",
+  "disabled": false,
+  "customAttributes": "{\"role\":\"admin\",\"coachId\":null}",
+  "providerUserInfo": []
+},
+{
+  "localId": "h6jxGUHnlOMuYGO7VqExsbtJURs2",
+  "email": "bob@student.com",
+  "emailVerified": true,
+  "passwordHash": "ai5tRBINtgA4gWhy37pdxg0XJa1TcJyBGcXDyt2B0y3otIRW1FrLYDjqEtEitYqiNYpbwJQHkO4jmU+9/lf0Jg==",
+  "salt": "qUtINAkE8VgJHw==",
+  "displayName": "Bob Smith",
+  "createdAt": "1762008804070",
+  "disabled": false,
+  "customAttributes": "{\"role\":\"student\",\"coachId\":\"BHo5abrjh4MhOEnP8N5P\"}",
+  "providerUserInfo": []
+},
+{
+  "localId": "i4FWO9RYqOY054jsYhHjZwE58ml2",
+  "email": "coach@demo.com",
+  "emailVerified": true,
+  "passwordHash": "er1cZ8nfNiEr6oSkKrahBXqDHBDLXS6SlU+LwLxBCCTnTspXQdyzvguDQSMDnqZJnbOZ64JILPm7HqX7Hgl31w==",
+  "salt": "PjZ4EbgYeNHq2g==",
+  "displayName": "Demo Coach",
+  "createdAt": "1761903894598",
+  "disabled": false,
+  "customAttributes": "{\"role\":\"teacher\",\"coachId\":\"eUwV55ZrJ2O4PK0KTFbv\"}",
+  "providerUserInfo": []
+},
+{
+  "localId": "pt9cR94vFIQBinN6Bc8TKsQdsGu2",
+  "email": "ammara.zetasoft@gmail.com",
+  "emailVerified": false,
+  "passwordHash": "GE9lnYGceCv6ZwB1I8HpFrdzO1myqkV7/h/HeT+P2yGszMSrVO4dUMK2iycMfNvpJhakTRgSdFkl1ajmqm93qw==",
+  "salt": "vVo1DxubbLh2ug==",
+  "lastSignedInAt": "1762722839622",
+  "createdAt": "1761999704823",
+  "customAttributes": "{\"role\":\"coach\",\"coachId\":\"BHo5abrjh4MhOEnP8N5P\"}",
+  "providerUserInfo": []
+},
+{
+  "localId": "sshUCJCgutc9ISgOxYv3jOoHkDr1",
+  "email": "azeemushan4@gmail.com",
+  "emailVerified": false,
+  "passwordHash": "EfLTNakWsHFlaPrzGXTclGsjphjTrT8s6d9U1391KZLeX03PP5t/WhbYn1jUil9y60+dv7Rftd+3kqwcuvVb4A==",
+  "salt": "O7hTG/KT0ijuTg==",
+  "lastSignedInAt": "1762445871153",
+  "createdAt": "1762001366623",
+  "customAttributes": "{\"role\":\"student\",\"coachId\":\"BHo5abrjh4MhOEnP8N5P\"}",
+  "providerUserInfo": []
+},
+{
+  "localId": "yPt3kKHAWqOT48vvGaHKWZwSJUm1",
+  "email": "ilearn@er21.org",
+  "emailVerified": true,
+  "passwordHash": "O/4m5TE5TyUK5tsy2z3UHm69eceI8dznLnxF106DdamCxPOpCrvd2QzAHAWbiImm97PxrEwHJqLBHqeI/OUUrw==",
+  "salt": "yverVjRFRJJ99A==",
+  "lastSignedInAt": "1762601507036",
+  "createdAt": "1761608574949",
+  "disabled": false,
+  "customAttributes": "{\"role\":\"admin\",\"coachId\":\"yPt3kKHAWqOT48vvGaHKWZwSJUm1\"}",
+  "providerUserInfo": []
+}]}

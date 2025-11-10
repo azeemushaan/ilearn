@@ -297,6 +297,12 @@ export default function AssignmentPage({ params }: { params: Promise<{ assignmen
                                     <Settings className="h-4 w-4 mr-2" />
                                     {video.status === 'not_ready' ? 'Process Video' : 'Reprocess'}
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/dashboard/videos/${video.id}/mcqs`}>
+                                      <FileText className="h-4 w-4 mr-2" />
+                                      Manage MCQs
+                                    </Link>
+                                  </DropdownMenuItem>
                                   {video.status === 'failed' && (
                                     <DropdownMenuItem onClick={() => handleProcessVideo(video)}>
                                       <RotateCw className="h-4 w-4 mr-2" />

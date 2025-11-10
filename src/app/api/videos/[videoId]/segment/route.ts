@@ -3,7 +3,7 @@ import { adminFirestore } from '@/lib/firebase/admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { cleanFirestoreData } from '@/lib/utils';
 import { parseSRT, parseVTT } from '@/lib/youtube/segmentation';
-import { segmentTranscriptPhase5, toFirestoreSegment, segmentTelemetrySummary } from '@/lib/phase5/segmentation';
+import { segmentTranscriptPhase5, toFirestoreSegment, segmentTelemetrySummary, type CaptionCue } from '@/lib/phase5/segmentation';
 import { SEG_MIN_CHARS } from '@/lib/constants/phase5';
 
 /**
@@ -78,11 +78,18 @@ export async function POST(
     console.log('[Segment] Caption content length:', captionData.content.length);
     console.log('[Segment] Caption content preview:', captionData.content.substring(0, 200));
 
-    const cues = captionData.format === 'vtt'
+    const parsedCues = captionData.format === 'vtt'
       ? parseVTT(captionData.content)
       : parseSRT(captionData.content);
 
-    console.log('[Segment] Parsed cues count:', cues.length);
+    // Convert to CaptionCue format expected by segmentation
+    const cues: CaptionCue[] = parsedCues.map(cue => ({
+      tStartSec: cue.startTime,
+      tEndSec: cue.endTime,
+      text: cue.text,
+    }));
+
+    console.log('[Segment] Parsed cues count:', parsedCues.length, '-> converted to', cues.length);
     console.log('[Segment] First few cues:', cues.slice(0, 3));
 
     // Segment transcript

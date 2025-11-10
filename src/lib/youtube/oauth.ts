@@ -46,9 +46,9 @@ export function getOAuth2Client(config?: YouTubeOAuthConfig) {
  */
 export function getAuthorizationUrl(state?: string): string {
   const oauth2Client = getOAuth2Client();
-  
+
   const scopes = [
-    'https://www.googleapis.com/auth/youtube.readonly',
+    'https://www.googleapis.com/auth/youtube',
     'https://www.googleapis.com/auth/youtube.force-ssl',
   ];
 
@@ -57,6 +57,9 @@ export function getAuthorizationUrl(state?: string): string {
     scope: scopes,
     state: state || '',
     prompt: 'consent', // Force consent screen to get refresh token
+    // Add additional parameters for better UX
+    include_granted_scopes: true,
+    response_type: 'code',
   });
 }
 

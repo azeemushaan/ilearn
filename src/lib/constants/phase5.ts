@@ -1,4 +1,4 @@
-export const SEG_MIN_CHARS = Number(process.env.NEXT_PUBLIC_SEG_MIN_CHARS ?? process.env.SEG_MIN_CHARS ?? 40);
+export const SEG_MIN_CHARS = Number(process.env.NEXT_PUBLIC_SEG_MIN_CHARS ?? process.env.SEG_MIN_CHARS ?? 20);
 
 export const PLAYER_EPSILON = Number(process.env.NEXT_PUBLIC_PLAYER_EPSILON ?? process.env.PLAYER_EPSILON ?? 0.25);
 

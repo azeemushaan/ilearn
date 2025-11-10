@@ -29,9 +29,10 @@ export type Phase5SegmentationResult = {
   logs: string[];
 };
 
-const MUSIC_PATTERNS = [/\bmus(?:ic|ical)\b/i, /\btheme\b/i, /\bintro music\b/i, /\bbackground music\b/i];
-const INTRO_PATTERNS = [/\bwelcome\b/i, /\bhey everyone\b/i, /\bintro(?:duction)?\b/i, /\bmy name is\b/i];
-const PROMO_PATTERNS = [/\bsponsor\b/i, /\bsponsored by\b/i, /\bsubscribe\b/i, /\bpromo\b/i, /\bpatreon\b/i];
+// More specific patterns to avoid false positives
+const MUSIC_PATTERNS = [/\btheme music\b/i, /\bbackground music\b/i, /\baudio track\b/i];
+const INTRO_PATTERNS = [/\bwelcome to\b/i, /\bhey everyone\b/i, /\bintroduction\b/i, /\bmy name is\b/i, /\bhello and welcome\b/i];
+const PROMO_PATTERNS = [/\bsponsored by\b/i, /\bpatreon\b/i, /\bdonate\b/i, /\bsupport the channel\b/i];
 
 const CLEAN_TEXT_REGEX = /\s+/g;
 const TITLE_WORD_REGEX = /[\w']+/g;
@@ -41,6 +42,12 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 const shouldSkipForPattern = (text: string, patterns: RegExp[]) => patterns.some(pattern => pattern.test(text));
 
 const isOffTopic = (text: string, videoTopic?: string) => {
+  // Disable off-topic detection for now - too aggressive
+  // TODO: Implement smarter topic detection using keywords
+  return false;
+
+  /*
+  // Original logic (too strict):
   if (!videoTopic) return false;
   const normalizedTopic = videoTopic.toLowerCase();
   const normalizedText = text.toLowerCase();
@@ -52,6 +59,7 @@ const isOffTopic = (text: string, videoTopic?: string) => {
     if (textTokens.has(token)) overlap++;
   });
   return overlap === 0 && textTokens.size > 0;
+  */
 };
 
 const normaliseText = (text: string) =>
@@ -93,6 +101,8 @@ export function segmentTranscriptPhase5(
   const keptSegments: Phase5Segment[] = [];
   const skipped: Phase5Skipped[] = [];
 
+  logs.push(`SEG:INIT called with ${cues?.length || 0} cues, topic="${videoTopic}"`);
+
   if (!Array.isArray(cues) || cues.length === 0) {
     logs.push('SEG:SKIP all reason=NO_CUES');
     return { segments: [], skipped, logs };
@@ -102,11 +112,16 @@ export function segmentTranscriptPhase5(
     .filter(cue => cue && typeof cue.tStartSec === 'number' && typeof cue.tEndSec === 'number')
     .map(cue => ({ ...cue, text: cue.text ?? '' }));
 
+  logs.push(`SEG:WORKING_CUES filtered from ${cues.length} to ${workingCues.length} cues`);
+
   let segmentStartIndex = 0;
 
   const pushSegment = (startIndex: number, endIndexExclusive: number) => {
     const segmentCues = workingCues.slice(startIndex, endIndexExclusive);
-    if (segmentCues.length === 0) return;
+    if (segmentCues.length === 0) {
+      logs.push('SEG:SKIP empty_segment');
+      return;
+    }
 
     const text = joinCueText(segmentCues);
     const tStartSec = segmentCues[0].tStartSec;
@@ -115,33 +130,35 @@ export function segmentTranscriptPhase5(
     const cleanedText = normaliseText(text);
     const charLength = cleanedText.length;
 
+    logs.push(`SEG:PROCESS t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)} chars=${charLength} cues=${segmentCues.length}`);
+
     if (charLength < SEG_MIN_CHARS) {
       skipped.push({ tStartSec, tEndSec, reason: 'SHORT', text: cleanedText });
-      logs.push(`SEG:SKIP reason=SHORT t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)} chars=${charLength}`);
+      logs.push(`SEG:SKIP reason=SHORT t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)} chars=${charLength} text="${cleanedText.substring(0, 50)}..."`);
       return;
     }
 
     if (shouldSkipForPattern(cleanedText, MUSIC_PATTERNS)) {
       skipped.push({ tStartSec, tEndSec, reason: 'MUSIC', text: cleanedText });
-      logs.push(`SEG:SKIP reason=MUSIC t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)}`);
+      logs.push(`SEG:SKIP reason=MUSIC t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)} text="${cleanedText.substring(0, 50)}..."`);
       return;
     }
 
     if (shouldSkipForPattern(cleanedText, PROMO_PATTERNS)) {
       skipped.push({ tStartSec, tEndSec, reason: 'PROMO', text: cleanedText });
-      logs.push(`SEG:SKIP reason=PROMO t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)}`);
+      logs.push(`SEG:SKIP reason=PROMO t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)} text="${cleanedText.substring(0, 50)}..."`);
       return;
     }
 
     if (shouldSkipForPattern(cleanedText, INTRO_PATTERNS)) {
       skipped.push({ tStartSec, tEndSec, reason: 'INTRO', text: cleanedText });
-      logs.push(`SEG:SKIP reason=INTRO t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)}`);
+      logs.push(`SEG:SKIP reason=INTRO t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)} text="${cleanedText.substring(0, 50)}..."`);
       return;
     }
 
     if (isOffTopic(cleanedText, videoTopic)) {
       skipped.push({ tStartSec, tEndSec, reason: 'OFF_TOPIC', text: cleanedText });
-      logs.push(`SEG:SKIP reason=OFF_TOPIC t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)}`);
+      logs.push(`SEG:SKIP reason=OFF_TOPIC t=${tStartSec.toFixed(2)}-${tEndSec.toFixed(2)} text="${cleanedText.substring(0, 50)}..."`);
       return;
     }
 
@@ -173,38 +190,49 @@ export function segmentTranscriptPhase5(
     const gap = currentCue.tStartSec - prevCue.tEndSec;
 
     if (gap >= 6) {
+      logs.push(`SEG:SPLIT gap=${gap.toFixed(2)} >= 6`);
       return true;
     }
 
     if (duration >= 120) {
+      logs.push(`SEG:SPLIT duration=${duration.toFixed(2)} >= 120`);
       return true;
     }
 
     if (currentTextLength >= 900) {
+      logs.push(`SEG:SPLIT textLength=${currentTextLength} >= 900`);
       return true;
     }
 
     const prevSentenceEnd = /[\.?!]\s*$/.test(prevCue.text.trim());
     if (duration >= 45 && prevSentenceEnd) {
+      logs.push(`SEG:SPLIT duration=${duration.toFixed(2)} >= 45 AND sentence_end`);
       return true;
     }
 
+    logs.push(`SEG:NO_SPLIT duration=${duration.toFixed(2)} gap=${gap.toFixed(2)} textLen=${currentTextLength}`);
     return false;
   };
+
+  logs.push(`SEG:START processing ${workingCues.length} cues`);
 
   for (let i = 0; i < workingCues.length; i++) {
     const cue = workingCues[i];
     const currentText = joinCueText(workingCues.slice(segmentStartIndex, i + 1));
 
     if (shouldSplit(i, segmentStartIndex, currentText.length)) {
+      logs.push(`SEG:SPLIT_TRIGGER at cue ${i} (${cue.tStartSec.toFixed(2)}s)`);
       pushSegment(segmentStartIndex, i);
       segmentStartIndex = i;
     }
 
     if (i === workingCues.length - 1) {
+      logs.push(`SEG:END_PROCESSING final segment from cue ${segmentStartIndex} to ${workingCues.length}`);
       pushSegment(segmentStartIndex, workingCues.length);
     }
   }
+
+  logs.push(`SEG:MERGE_CHECK ${keptSegments.length} segments before merge`);
 
   // merge very short trailing segments with previous kept segment if possible
   if (keptSegments.length >= 2) {
@@ -235,9 +263,16 @@ export function segmentTranscriptPhase5(
     for (let i = 0; i < merged.length; i++) {
       merged[i] = { ...merged[i], segmentId: `seg_${i + 1}`, title: buildTitle(merged[i].text) };
     }
+    logs.push(`SEG:FINAL_RESULT ${merged.length} segments after merge`);
     return { segments: merged, skipped, logs };
   }
 
+  // Renumber segments
+  for (let i = 0; i < keptSegments.length; i++) {
+    keptSegments[i] = { ...keptSegments[i], segmentId: `seg_${i + 1}` };
+  }
+
+  logs.push(`SEG:FINAL_RESULT ${keptSegments.length} segments (no merge needed)`);
   return { segments: keptSegments, skipped, logs };
 }
 

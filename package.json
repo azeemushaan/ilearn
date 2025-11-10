@@ -16,7 +16,8 @@
     "seed": "tsx scripts/seed-database.ts",
     "seed-videos": "tsx scripts/seed-demo-videos.ts",
     "seed-complete": "tsx scripts/seed-complete-flow.ts",
-    "migrate:phase3": "tsx scripts/migrate-to-manual-processing.ts"
+    "migrate:phase3": "tsx scripts/migrate-to-manual-processing.ts",
+    "setup-firebase": "tsx scripts/setup-firebase-admin.ts"
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.20.0",

@@ -85,3 +85,55 @@ export async function updateAiSettingsAction(formData: FormData) {
   revalidatePath('/admin/dashboard/settings/prompts');
   redirect('/admin/dashboard/settings?saved=ai');
 }
+
+// AI Connection Test Types and Actions
+export type TestAiConnectionState = {
+  status: 'idle' | 'success' | 'error';
+  message?: string;
+  provider?: string;
+  model?: string;
+  latencyMs?: number;
+  reply?: string;
+};
+
+export async function testAiConnectionAction(
+  prevState: TestAiConnectionState,
+  formData: FormData
+): Promise<TestAiConnectionState> {
+  const admin = await requireAdmin();
+
+  try {
+    const { getCachedAiEngine } = await import('@/ai/genkit');
+    const { instance, config, modelName } = await getCachedAiEngine();
+
+    const startTime = Date.now();
+
+    // Test with a simple prompt
+    const { text } = await instance.generate({
+      model: modelName,
+      prompt: 'Respond with exactly one word: "success"',
+      config: {
+        temperature: 0,
+        maxOutputTokens: 10,
+      },
+    });
+
+    const latencyMs = Date.now() - startTime;
+    const reply = text?.trim() || '';
+
+    return {
+      status: 'success',
+      message: 'Connection successful',
+      provider: config.provider,
+      model: config.model,
+      latencyMs,
+      reply: reply.length > 0 ? reply : 'success',
+    };
+  } catch (error: any) {
+    console.error('AI connection test failed:', error);
+    return {
+      status: 'error',
+      message: error.message || 'Connection test failed',
+    };
+  }
+}

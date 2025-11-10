@@ -14,10 +14,10 @@ export async function GET(request: NextRequest) {
     const state = request.nextUrl.searchParams.get('state');
 
     if (!code) {
-      return NextResponse.json(
-        { error: 'Authorization code missing' },
-        { status: 400 }
-      );
+      console.log('[YouTube Auth] Authorization code missing');
+      const redirectUrl = new URL('/dashboard/youtube', request.url);
+      redirectUrl.searchParams.set('youtube_error', 'true');
+      return NextResponse.redirect(redirectUrl);
     }
 
     // Parse state to get user ID
@@ -29,17 +29,17 @@ export async function GET(request: NextRequest) {
       userId = stateData.userId;
       coachId = stateData.coachId;
     } catch (error) {
-      return NextResponse.json(
-        { error: 'Invalid state parameter' },
-        { status: 400 }
-      );
+      console.log('[YouTube Auth] Invalid state parameter:', error);
+      const redirectUrl = new URL('/dashboard/youtube', request.url);
+      redirectUrl.searchParams.set('youtube_error', 'true');
+      return NextResponse.redirect(redirectUrl);
     }
 
     if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID missing from state' },
-        { status: 400 }
-      );
+      console.log('[YouTube Auth] User ID missing from state');
+      const redirectUrl = new URL('/dashboard/youtube', request.url);
+      redirectUrl.searchParams.set('youtube_error', 'true');
+      return NextResponse.redirect(redirectUrl);
     }
 
     // Exchange code for tokens
@@ -49,10 +49,11 @@ export async function GET(request: NextRequest) {
     const channels = await listUserChannels(tokens.accessToken);
 
     if (channels.length === 0) {
-      return NextResponse.json(
-        { error: 'No YouTube channels found for this account' },
-        { status: 400 }
-      );
+      console.log('[YouTube Auth] No channels found for user');
+      // Redirect back with error
+      const redirectUrl = new URL('/dashboard/youtube', request.url);
+      redirectUrl.searchParams.set('youtube_error', 'true');
+      return NextResponse.redirect(redirectUrl);
     }
 
     // Store connection in Firestore

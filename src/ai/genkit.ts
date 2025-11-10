@@ -350,3 +350,17 @@ const {instance: ai, config: aiSettings, modelName: aiModelName, runtimeConfig: 
   await initialization;
 
 export {ai, aiModelName, aiRuntimeConfig, aiSettings};
+
+// Cache for AI engine instances to avoid reinitializing on every request
+let aiCache: AiInitialization | null = null;
+
+export async function getCachedAiEngine(): Promise<AiInitialization> {
+  if (!aiCache) {
+    aiCache = await initializeAi();
+  }
+  return aiCache;
+}
+
+export function invalidateAiEngineCache() {
+  aiCache = null;
+}
